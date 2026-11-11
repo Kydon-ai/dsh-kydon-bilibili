@@ -189,7 +189,7 @@ function videoCommentPrompt(
 
 function fitTranscript(lines: readonly string[], fullLength: number, maxCharacters: number): string {
   if (fullLength <= maxCharacters) return lines.join('\n')
-  const label = `[字幕较长，以下字幕按时间均匀抽样；全文 ${String(fullLength)} 字符。]\n`
+  const label = `[字幕较长，以下字幕按字幕顺序均匀抽样；全文 ${String(fullLength)} 字符。]\n`
   const contentBudget = maxCharacters - label.length
   let stride = Math.max(2, Math.ceil(fullLength / contentBudget))
   let selected: string[]
