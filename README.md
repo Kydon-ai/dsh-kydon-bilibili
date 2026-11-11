@@ -158,7 +158,7 @@ Read the source files for the complete request and lifecycle details.
 
 #### What the model sees
 
-Each unhandled notification with usable context creates one isolated Agent Session. The model sees the article body for article comments, timestamped text transcribed from video audio, and the relevant timestamped thread or current @ comment. The reply policy is recorded as the Session system prompt; the notification context and assistant output are recorded as messages. Tool calls are denied for this Agent.
+Each unhandled notification with usable context creates one isolated Agent Session. The model sees the article body for article comments, timestamped text transcribed from video audio, and the relevant timestamped thread or current @ comment. The Session system prompt asks the model to write a concise Simplified Chinese reply of no more than 1,000 characters. The notification context and assistant output are recorded as messages. Tool calls are denied for this Agent.
 
 #### Token effect
 
@@ -174,6 +174,7 @@ The poller only handles comment @ and reply notifications.
 
 - Notification polling stays paused until the user approves ASR dependency installation in the plugin settings card; deferring or failing setup also pauses article replies.
 - Bilibili API or local-state errors stop the current poll; the next scheduled poll retries saved pending notifications and scans both feeds again.
+- The 1,000-character reply limit is a prompt instruction, not a posting-time check; longer output can be rejected by Bilibili and retried on the next poll.
 - The first saved feed checkpoint cannot recover notifications already read before that baseline; later read-before-poll recovery depends on Bilibili continuing to return those entries in the feed.
 - Multiple Host processes sharing one plugin data directory can race and send duplicate replies.
 - The local deduplication file grows with the number of handled comments.

@@ -12,6 +12,6 @@ __pycache__/
 *.log
 log/
 node_modules/
-lib/
+/lib/
 .pytest_cache/
 .ruff_cache/
