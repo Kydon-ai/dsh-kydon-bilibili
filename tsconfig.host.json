@@ -29,6 +29,7 @@
     { "path": "../packages/core/agent" },
     { "path": "../packages/core/agent-default-model" },
     { "path": "../packages/preset/agent-presets" },
+    { "path": "../packages/skill/skill" },
     { "path": "../packages/core/session" },
     { "path": "../packages/core/system-prompt" },
     { "path": "../packages/core/tools" },
