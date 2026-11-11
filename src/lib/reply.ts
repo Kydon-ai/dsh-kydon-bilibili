@@ -81,7 +81,7 @@ export async function generateReply(
         text: systemPrompt,
       })
       agentCtx.tools.presentAs('native')
-      agentCtx.tools.restrict({ allow: kind === 'video-summary' ? ['skill'] : [] })
+      agentCtx.tools.restrict({ allow: [] })
       agentCtx.tools.guard(exec => (
         kind === 'video-summary' && exec.name === 'skill'
           ? undefined
