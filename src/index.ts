@@ -12,6 +12,7 @@ import { AsrSetupManager, type AsrSetupSnapshot } from './lib/asr-setup.ts'
 import { loginPoll, loginStart, readAccountProfile, renderQrDataUrl, saveCredential } from './lib/login.ts'
 import { pollNotifications } from './lib/notifications.ts'
 import { generateReply } from './lib/reply.ts'
+import { runVideoCommentCycle } from './lib/video-comments.ts'
 import { createRequestLog, type ConversationLog } from './lib/conversation-log.ts'
 import { logIncoming } from './lib/http-log.ts'
 
@@ -46,6 +47,18 @@ export interface Config {
   replyGenerationTimeoutMs?: number
   /** Additional model rewrites after an oversized reply, from 0 to 5. Defaults to 2. */
   replyLengthRewriteAttempts?: number
+  /** Enable automatic video summary comments. Defaults to true. */
+  videoCommentEnabled?: boolean
+  /** Delay between video discovery and comment cycles, in milliseconds. Defaults to 600000. */
+  videoCommentIntervalMs?: number
+  /** Maximum videos to comment on in one discovery cycle, from 1 to 3. Defaults to 1. */
+  videoCommentMaxPerRun?: number
+  /** Skip videos longer than this duration, in seconds. Defaults to 1800. */
+  videoCommentMaxDurationSeconds?: number
+  /** Maximum transcript characters passed to the model. Defaults to 40000. */
+  videoCommentMaxTranscriptCharacters?: number
+  /** Search terms used one at a time in the rotating Bilibili search request. */
+  videoCommentSearchTerms?: string[]
   /** Python executable with yt-dlp and faster-whisper installed. Defaults to the uv environment in the plugin's .venv. */
   asrPythonExecutable?: string
   /** Directory for the Whisper model, downloaded audio, and SRT files. Defaults to the plugin's .cache directory. */
@@ -70,6 +83,18 @@ export const Config: z<Config> = z.object({
   notificationRequestTimeoutMs: z.number().step(1).min(1_000).max(120_000).default(20_000),
   replyGenerationTimeoutMs: z.number().step(1).min(1_000).max(300_000).default(120_000),
   replyLengthRewriteAttempts: z.number().step(1).min(0).max(5).default(2),
+  videoCommentEnabled: z.boolean().default(true),
+  videoCommentIntervalMs: z.number().step(1).min(60_000).max(3_600_000).default(600_000),
+  videoCommentMaxPerRun: z.number().step(1).min(1).max(3).default(1),
+  videoCommentMaxDurationSeconds: z.number().step(1).min(60).max(14_400).default(1_800),
+  videoCommentMaxTranscriptCharacters: z.number().step(1).min(5_000).max(100_000).default(40_000),
+  videoCommentSearchTerms: z.array(z.string().min(1)).min(1).max(20).default([
+    '把复杂原理讲明白',
+    '冷门但实用的生活技巧',
+    '普通人做出的有趣实验',
+    '最近值得关注的科技变化',
+    '一个问题的反直觉答案',
+  ]),
   asrPythonExecutable: z.string().min(1).default(DEFAULT_ASR_PYTHON_EXECUTABLE),
   asrCacheDir: z.string().min(1).default(DEFAULT_ASR_CACHE_DIR),
   asrTimeoutMs: z.number().step(1).min(10_000).max(14_400_000).default(1_800_000),
@@ -86,6 +111,12 @@ interface ResolvedConfig {
   readonly notificationRequestTimeoutMs: number
   readonly replyGenerationTimeoutMs: number
   readonly replyLengthRewriteAttempts: number
+  readonly videoCommentEnabled: boolean
+  readonly videoCommentIntervalMs: number
+  readonly videoCommentMaxPerRun: number
+  readonly videoCommentMaxDurationSeconds: number
+  readonly videoCommentMaxTranscriptCharacters: number
+  readonly videoCommentSearchTerms: readonly string[]
   readonly asrOptions: AsrOptions
   readonly uvExecutable: string
   readonly asrInstallTimeoutMs: number
@@ -114,6 +145,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const requestLog = createRequestLog(resolved.logDir)
   let disposed = false
   let stopPoller: (() => Promise<void>) | undefined
+  let stopVideoCommenter: (() => Promise<void>) | undefined
   const setup = new AsrSetupManager({
     pluginDir: PLUGIN_DIR,
     lockPath: resolve(PLUGIN_DIR, 'uv.lock'),
@@ -126,12 +158,18 @@ export function apply(ctx: Context, config: Config = {}): void {
     timeoutMs: resolved.asrInstallTimeoutMs,
     subprocess: ctx.subprocess,
     onReady: () => {
-      if (!disposed && stopPoller === undefined) stopPoller = startNotificationPoller()
+      if (disposed) return
+      if (stopPoller === undefined) stopPoller = startNotificationPoller()
+      if (resolved.videoCommentEnabled && stopVideoCommenter === undefined) {
+        stopVideoCommenter = startVideoCommenter()
+      }
     },
     onPause: async () => {
       const stop = stopPoller
       stopPoller = undefined
-      await stop?.()
+      const stopVideos = stopVideoCommenter
+      stopVideoCommenter = undefined
+      await Promise.all([stop?.(), stopVideos?.()])
     },
     warn: message => console.warn(`${LOG_PREFIX} ${message}`),
   })
@@ -200,6 +238,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       disposed = true
       await setup.dispose()
       await stopPoller?.()
+      await stopVideoCommenter?.()
     }
   }, 'dsh-kydon-bilibili: ASR setup and notification lifecycle')
 
@@ -274,6 +313,70 @@ export function apply(ctx: Context, config: Config = {}): void {
       await activePoll
     }
   }
+
+  function startVideoCommenter(): () => Promise<void> {
+    const controller = new AbortController()
+    let stopping = false
+    let activeScan: Promise<void> | undefined
+    let reportedMissingCredential = false
+    console.info(
+      `${LOG_PREFIX} video commenter started; interval=${String(resolved.videoCommentIntervalMs)}ms; `
+      + `maxPerRun=${String(resolved.videoCommentMaxPerRun)}; logs=${resolved.logDir}.`,
+    )
+
+    const scan = (): void => {
+      if (stopping || activeScan !== undefined) return
+      const task = runVideoCommentCycle({
+        context: ctx,
+        stateDir: LOGIN_STATE_DIR,
+        logDir: resolved.logDir,
+        requestLog,
+        signal: controller.signal,
+        requestTimeoutMs: resolved.notificationRequestTimeoutMs,
+        generationTimeoutMs: resolved.replyGenerationTimeoutMs,
+        maxLengthRewrites: resolved.replyLengthRewriteAttempts,
+        asrOptions: resolved.asrOptions,
+        subprocess: ctx.subprocess,
+        searchTerms: resolved.videoCommentSearchTerms,
+        maxVideosPerRun: resolved.videoCommentMaxPerRun,
+        maxVideoDurationSeconds: resolved.videoCommentMaxDurationSeconds,
+        maxTranscriptCharacters: resolved.videoCommentMaxTranscriptCharacters,
+        onComment: (candidate, content) => console.info(
+          `${LOG_PREFIX} posted video summary comment for ${candidate.bvid} (${String(content.length)} characters).`,
+        ),
+        onFailure: (candidate, error) => console.warn(
+          `${LOG_PREFIX} video summary comment failed${candidate === undefined ? '' : ` for ${candidate.bvid}`}.`,
+          error instanceof Error ? error.message : String(error),
+        ),
+      }).then((result) => {
+        if (result.state === 'no-credentials') {
+          if (!reportedMissingCredential) console.info(`${LOG_PREFIX} video commenter is idle until QR login completes.`)
+          reportedMissingCredential = true
+          return
+        }
+        reportedMissingCredential = false
+        console.info(
+          `${LOG_PREFIX} video scan complete: posted=${String(result.commentsPosted)}, `
+          + `skipped=${String(result.videosSkipped)}.`,
+        )
+      }).catch((error: unknown) => {
+        if (stopping && controller.signal.aborted) return
+        console.warn(`${LOG_PREFIX} video discovery cycle failed.`, error)
+      }).finally(() => {
+        if (activeScan === task) activeScan = undefined
+      })
+      activeScan = task
+    }
+
+    const timer = setInterval(scan, resolved.videoCommentIntervalMs)
+    scan()
+    return async () => {
+      stopping = true
+      clearInterval(timer)
+      controller.abort(new Error('Bilibili video commenter disposed.'))
+      await activeScan
+    }
+  }
 }
 
 /** Resolve and validate QR and notification polling settings at plugin load. */
@@ -284,6 +387,18 @@ function resolveConfig(config: Config): ResolvedConfig {
   const notificationRequestTimeoutMs = config.notificationRequestTimeoutMs ?? 20_000
   const replyGenerationTimeoutMs = config.replyGenerationTimeoutMs ?? 120_000
   const replyLengthRewriteAttempts = config.replyLengthRewriteAttempts ?? 2
+  const videoCommentEnabled = config.videoCommentEnabled ?? true
+  const videoCommentIntervalMs = config.videoCommentIntervalMs ?? 600_000
+  const videoCommentMaxPerRun = config.videoCommentMaxPerRun ?? 1
+  const videoCommentMaxDurationSeconds = config.videoCommentMaxDurationSeconds ?? 1_800
+  const videoCommentMaxTranscriptCharacters = config.videoCommentMaxTranscriptCharacters ?? 40_000
+  const videoCommentSearchTerms = config.videoCommentSearchTerms ?? [
+    '把复杂原理讲明白',
+    '冷门但实用的生活技巧',
+    '普通人做出的有趣实验',
+    '最近值得关注的科技变化',
+    '一个问题的反直觉答案',
+  ]
   const asrPythonExecutable = config.asrPythonExecutable ?? DEFAULT_ASR_PYTHON_EXECUTABLE
   const asrCacheDir = config.asrCacheDir ?? DEFAULT_ASR_CACHE_DIR
   const asrTimeoutMs = config.asrTimeoutMs ?? 1_800_000
@@ -312,6 +427,26 @@ function resolveConfig(config: Config): ResolvedConfig {
   if (!Number.isSafeInteger(replyLengthRewriteAttempts) || replyLengthRewriteAttempts < 0 || replyLengthRewriteAttempts > 5) {
     throw new TypeError('dsh-kydon-bilibili: replyLengthRewriteAttempts must be an integer from 0 to 5')
   }
+  if (typeof videoCommentEnabled !== 'boolean') {
+    throw new TypeError('dsh-kydon-bilibili: videoCommentEnabled must be a boolean')
+  }
+  if (!Number.isSafeInteger(videoCommentIntervalMs) || videoCommentIntervalMs < 60_000 || videoCommentIntervalMs > 3_600_000) {
+    throw new TypeError('dsh-kydon-bilibili: videoCommentIntervalMs must be an integer from 60000 to 3600000')
+  }
+  if (!Number.isSafeInteger(videoCommentMaxPerRun) || videoCommentMaxPerRun < 1 || videoCommentMaxPerRun > 3) {
+    throw new TypeError('dsh-kydon-bilibili: videoCommentMaxPerRun must be an integer from 1 to 3')
+  }
+  if (!Number.isSafeInteger(videoCommentMaxDurationSeconds) || videoCommentMaxDurationSeconds < 60 || videoCommentMaxDurationSeconds > 14_400) {
+    throw new TypeError('dsh-kydon-bilibili: videoCommentMaxDurationSeconds must be an integer from 60 to 14400')
+  }
+  if (!Number.isSafeInteger(videoCommentMaxTranscriptCharacters)
+    || videoCommentMaxTranscriptCharacters < 5_000 || videoCommentMaxTranscriptCharacters > 100_000) {
+    throw new TypeError('dsh-kydon-bilibili: videoCommentMaxTranscriptCharacters must be an integer from 5000 to 100000')
+  }
+  if (videoCommentSearchTerms.length === 0 || videoCommentSearchTerms.length > 20
+    || videoCommentSearchTerms.some(term => term.trim().length === 0)) {
+    throw new TypeError('dsh-kydon-bilibili: videoCommentSearchTerms must contain 1 to 20 non-empty terms')
+  }
   if (!Number.isSafeInteger(asrTimeoutMs) || asrTimeoutMs < 10_000 || asrTimeoutMs > 14_400_000) {
     throw new TypeError('dsh-kydon-bilibili: asrTimeoutMs must be an integer from 10000 to 14400000')
   }
@@ -328,6 +463,12 @@ function resolveConfig(config: Config): ResolvedConfig {
     notificationRequestTimeoutMs,
     replyGenerationTimeoutMs,
     replyLengthRewriteAttempts,
+    videoCommentEnabled,
+    videoCommentIntervalMs,
+    videoCommentMaxPerRun,
+    videoCommentMaxDurationSeconds,
+    videoCommentMaxTranscriptCharacters,
+    videoCommentSearchTerms: [...videoCommentSearchTerms],
     asrOptions: {
       pythonExecutable: asrPythonExecutable,
       workerPath: ASR_WORKER_PATH,

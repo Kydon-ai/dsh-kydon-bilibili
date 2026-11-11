@@ -210,9 +210,13 @@ function parseCandidateList(
 
 function durationSeconds(value: unknown): number | null {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value
-  if (typeof value !== 'string' || !/^\d{1,3}:\d{2}:\d{2}$/u.test(value)) return null
+  if (typeof value !== 'string' || !/^(?:\d{1,3}:)?\d{1,3}:\d{2}$/u.test(value)) return null
   const parts = value.split(':').map(Number)
-  if (parts.length !== 3) return null
+  if (parts.length === 2) {
+    const [minutes, seconds] = parts
+    if (minutes === undefined || seconds === undefined) return null
+    return minutes * 60 + seconds
+  }
   const [hours, minutes, seconds] = parts
   if (hours === undefined || minutes === undefined || seconds === undefined) return null
   return hours * 3_600 + minutes * 60 + seconds
