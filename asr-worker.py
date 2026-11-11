@@ -203,7 +203,7 @@ def main() -> int:
                     model, audio_output, device, request["batchSize"]
                 )
             if not cues:
-                raise ValueError("Whisper did not recognize speech in the video audio.")
+                return emit_failure("Whisper did not recognize speech in the video audio.")
 
             subtitle_dir = cache_dir / "subtitles"
             subtitle_dir.mkdir(parents=True, exist_ok=True, mode=0o700)

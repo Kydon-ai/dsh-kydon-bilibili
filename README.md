@@ -87,6 +87,8 @@ The default search terms rotate through “把复杂原理讲明白”, “冷�
 
 The model summarizes the opening, main content, and ending, lists each timeline event on its own line, and finishes with a brief subtitle-grounded evaluation. The plugin posts the result as a top-level comment and applies the same 1,000-character guard used for notification replies. Search terms and the source cursor persist in the DSH home. The state file also remembers the latest 2,000 successfully commented BV ids.
 
+Videos with no recognizable speech are skipped, and the ASR log records that reason explicitly.
+
 Before generating a video comment, the Agent joins the current default agent preset so its `skill` tool and skill sources are available, then loads the model-invocable `cc-summary` skill and follows its subtitle-analysis and evaluation rules. The video-summary Agent can execute only this skill-loading tool; if the skill or tool is missing, the video is skipped instead of falling back to the previous prompt.
 
 Build and start the plugin from the Harness repository root:
