@@ -2,8 +2,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile, readdir } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -52,7 +52,7 @@ const VIDEO_SUMMARY_SYSTEM_PROMPT = [
  * @param timeoutMs - maximum duration of model generation.
  * @param log - per-notification log for model input and available output.
  * @param maxLengthRewrites - maximum additional model rewrites for oversized drafts.
- * @param kind - comment policy to apply; video summaries read and prepend the local `cc-summary` skill.
+ * @param kind - comment policy to apply; every project skill is prepended to the system prompt.
  * @returns the assistant's final text reply.
  * @throws when generation fails, output extraction fails, or rewrites cannot meet the reply limit.
  */
@@ -72,12 +72,9 @@ export async function generateReply(
   if (kind === 'video-summary' && agentPresetId === undefined) {
     throw new Error('Video summary generation requires a default Agent preset.')
   }
-  const skillPath = fileURLToPath(new URL(`../skills/${VIDEO_SUMMARY_SKILL_NAME}/SKILL.md`, import.meta.url))
-  const skill = kind === 'video-summary' ? await readRequiredSkill(skillPath) : undefined
-  const completeSystemPrompt = skill === undefined
-    ? systemPrompt
-    : buildVideoSummarySystemPrompt(skill.content, skill.basePath)
-  if (skill !== undefined) log.write('已预加载视频总结技能', skill.path)
+  const projectSkills = await readProjectSkills()
+  const completeSystemPrompt = buildSystemPromptWithSkills(projectSkills, systemPrompt)
+  log.write('已预加载项目技能', projectSkills.map(skill => `${skill.name}: ${skill.path}`).join('\n'))
   const sessionId = brandString<SessionId>(`bilibili-${kind}-${randomUUID()}`)
   log.write('模型会话', JSON.stringify({ sessionId, ...selection }, null, 2))
   log.write('模型输入：公开评论规则', systemPrompt)
@@ -240,34 +237,85 @@ export function generateVideoSummaryComment(
   return generateReply(ctx, prompt, signal, timeoutMs, log, maxLengthRewrites, 'video-summary')
 }
 
-async function readRequiredSkill(path: string): Promise<{ path: string; basePath: string; content: string }> {
-  let content: string
-  try {
-    content = await readFile(path, 'utf8')
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error)
-    throw new Error(`Could not read required project skill "${VIDEO_SUMMARY_SKILL_NAME}" at "${path}": ${detail}`)
-  }
-  if (content.trim().length === 0) {
-    throw new Error(`Required project skill "${VIDEO_SUMMARY_SKILL_NAME}" is empty: "${path}"`)
-  }
-  return { path, basePath: dirname(path), content }
+interface ProjectSkill {
+  readonly name: string
+  readonly path: string
+  readonly basePath: string
+  readonly content: string
 }
 
-function buildVideoSummarySystemPrompt(skillText: string, skillBasePath: string): string {
-  const skillInstructions = [
-    `<skill_content name="${VIDEO_SUMMARY_SKILL_NAME}">`,
+async function readProjectSkills(): Promise<ProjectSkill[]> {
+  const root = fileURLToPath(new URL('../skills/', import.meta.url))
+  const paths = await findSkillFiles(root)
+  if (paths.length === 0) {
+    throw new Error(`No project skills were found under "${root}".`)
+  }
+  const skills = await Promise.all(paths.map(async path => {
+    let content: string
+    try {
+      content = await readFile(path, 'utf8')
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(`Could not read project skill at "${path}": ${detail}`)
+    }
+    if (content.trim().length === 0) {
+      throw new Error(`Project skill file is empty: "${path}"`)
+    }
+    return {
+      name: readSkillName(content) ?? basename(dirname(path)),
+      path,
+      basePath: dirname(path),
+      content,
+    }
+  }))
+  return skills.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
+}
+
+async function findSkillFiles(directory: string): Promise<string[]> {
+  let entries
+  try {
+    entries = await readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+  const paths: string[] = []
+  for (const entry of entries) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      paths.push(...await findSkillFiles(path))
+    } else if (entry.isFile() && entry.name === 'SKILL.md') {
+      paths.push(path)
+    }
+  }
+  return paths
+}
+
+function readSkillName(content: string): string | undefined {
+  const frontmatter = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/)?.[1]
+  const nameLine = frontmatter?.split(/\r?\n/).find(line => /^name\s*:/i.test(line))
+  const name = nameLine?.replace(/^name\s*:\s*/i, '').trim().replace(/^(?:"(.*)"|'(.*)')$/, '$1$2')
+  return name || undefined
+}
+
+function buildSystemPromptWithSkills(skills: readonly ProjectSkill[], policy: string): string {
+  const renderedSkills = skills.map(skill => [
+    `<skill_content name="${escapeSkillName(skill.name)}">`,
     '<skill_resources>',
-    `Base directory for this skill: ${skillBasePath}`,
+    `Base directory for this skill: ${skill.basePath}`,
     'Resolve relative paths mentioned by this skill against the base directory before using them. Load referenced resources only as needed.',
     '</skill_resources>',
     '',
     '<skill_instructions>',
-    skillText,
+    skill.content,
     '</skill_instructions>',
     '</skill_content>',
-  ].join('\n')
-  return [skillInstructions, VIDEO_SUMMARY_SYSTEM_PROMPT].join('\n\n')
+  ].join('\n'))
+  return [...renderedSkills, policy].join('\n\n')
+}
+
+function escapeSkillName(name: string): string {
+  return name.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')
 }
 
 function rewritePrompt(kind: 'reply' | 'video-summary'): string {

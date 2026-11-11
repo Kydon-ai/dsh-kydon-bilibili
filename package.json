@@ -39,7 +39,7 @@
     "pyproject.toml",
     "uv.lock",
     ".python-version",
-    "skills/cc-summary/SKILL.md",
+    "skills/**/*",
     "lib/index.js",
     "lib/client.js",
     "lib/types/**/*.js",
