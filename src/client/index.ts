@@ -21,7 +21,7 @@ export function apply(ctx: ClientContext): void {
   )
   ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
     name: 'plugins.bundle.config',
-    key: '@deepseek-ai/dsh-kydon-bilibili',
+    key: '@kydon/dsh-kydon-bilibili',
     locale: LOCALE_NAMESPACE,
   }, BilibiliLoginCard))
 }

@@ -3,7 +3,7 @@ description: "Configures Bilibili QR login, automatic replies to unread comment 
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-kydon-bilibili
+# @kydon/dsh-kydon-bilibili
 
 English | [中文](README.zh.md)
 
@@ -37,7 +37,7 @@ The profile patch mounts the plugin with the defaults below; change these values
 
 ```yaml
 - id: dsh-kydon-bilibili
-  name: '@deepseek-ai/dsh-kydon-bilibili'
+  name: '@kydon/dsh-kydon-bilibili'
   config:
     qrPollIntervalMs: 2000
     qrTimeoutMs: 180000
@@ -94,7 +94,7 @@ Before generating a video comment, the Agent joins the current default agent pre
 Build and start the plugin from the Harness repository root:
 
 ```powershell
-pnpm --filter @deepseek-ai/dsh-kydon-bilibili bundle
+pnpm --filter @kydon/dsh-kydon-bilibili bundle
 pnpm dsh web --patch .\dsh-kydon-bilibili\cordis.yml
 ```
 
@@ -107,7 +107,7 @@ CUDA availability depends on CTranslate2's device detection and model loading; i
 Run this command from the repository root after editing files under `src/`:
 
 ```powershell
-pnpm --filter @deepseek-ai/dsh-kydon-bilibili bundle
+pnpm --filter @kydon/dsh-kydon-bilibili bundle
 ```
 
 The script compiles the Host and Client TypeScript projects, then rebuilds `lib/index.js` and `lib/client.js`. Stop and restart the running `dsh web` process to load the new bundles; `pnpm install` does not rebuild this plugin.

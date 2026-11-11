@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-kydon-bilibili",
+  "name": "@kydon/dsh-kydon-bilibili",
   "description": "适用于DSH的 Bilibili二维码登录及自动通知回复插件",
   "version": "0.0.1",
   "type": "module",

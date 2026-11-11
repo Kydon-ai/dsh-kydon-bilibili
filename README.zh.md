@@ -3,7 +3,7 @@ description: "配置 B 站二维码登录、未读评论通知自动回复和定
 kind: "package-reference"
 ---
 
-# @deepseek-ai/dsh-kydon-bilibili
+# @kydon/dsh-kydon-bilibili
 
 [English](README.md) | 中文
 
@@ -37,7 +37,7 @@ profile 补丁使用以下默认值挂载插件；可以在插件配置中修改
 
 ```yaml
 - id: dsh-kydon-bilibili
-  name: '@deepseek-ai/dsh-kydon-bilibili'
+  name: '@kydon/dsh-kydon-bilibili'
   config:
     qrPollIntervalMs: 2000
     qrTimeoutMs: 180000
@@ -94,7 +94,7 @@ ASR 设置成功后，Host 会立即运行一次视频扫描，之后按 `videoC
 从 Harness 仓库根目录编译并启动插件：
 
 ```powershell
-pnpm --filter @deepseek-ai/dsh-kydon-bilibili bundle
+pnpm --filter @kydon/dsh-kydon-bilibili bundle
 pnpm dsh web --patch .\dsh-kydon-bilibili\cordis.yml
 ```
 
@@ -107,7 +107,7 @@ GPU 是否可用由 CTranslate2 的 CUDA 设备检测和模型加载结果决定
 在仓库根目录编辑 `src/` 下的文件后，运行：
 
 ```powershell
-pnpm --filter @deepseek-ai/dsh-kydon-bilibili bundle
+pnpm --filter @kydon/dsh-kydon-bilibili bundle
 ```
 
 该脚本会编译 Host 和 Client 的 TypeScript 项目，然后重新生成 `lib/index.js` 和 `lib/client.js`。停止并重新启动正在运行的 `dsh web` 进程以加载新产物；`pnpm install` 不会重新编译这个插件。

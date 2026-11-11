@@ -1,6 +1,6 @@
 - insert:
     - id: dsh-kydon-bilibili
-      name: '@deepseek-ai/dsh-kydon-bilibili'
+      name: '@kydon/dsh-kydon-bilibili'
       config:
         qrPollIntervalMs: 2000
         qrTimeoutMs: 180000
