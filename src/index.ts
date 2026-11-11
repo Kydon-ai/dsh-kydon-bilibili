@@ -44,6 +44,8 @@ export interface Config {
   notificationRequestTimeoutMs?: number
   /** Maximum duration of one model-generated public reply, in milliseconds. Defaults to 120000. */
   replyGenerationTimeoutMs?: number
+  /** Additional model rewrites after an oversized reply, from 0 to 5. Defaults to 2. */
+  replyLengthRewriteAttempts?: number
   /** Python executable with yt-dlp and faster-whisper installed. Defaults to the uv environment in the plugin's .venv. */
   asrPythonExecutable?: string
   /** Directory for the Whisper model, downloaded audio, and SRT files. Defaults to the plugin's .cache directory. */
@@ -67,6 +69,7 @@ export const Config: z<Config> = z.object({
   notificationPollIntervalMs: z.number().step(1).min(10_000).max(3_600_000).default(60_000),
   notificationRequestTimeoutMs: z.number().step(1).min(1_000).max(120_000).default(20_000),
   replyGenerationTimeoutMs: z.number().step(1).min(1_000).max(300_000).default(120_000),
+  replyLengthRewriteAttempts: z.number().step(1).min(0).max(5).default(2),
   asrPythonExecutable: z.string().min(1).default(DEFAULT_ASR_PYTHON_EXECUTABLE),
   asrCacheDir: z.string().min(1).default(DEFAULT_ASR_CACHE_DIR),
   asrTimeoutMs: z.number().step(1).min(10_000).max(14_400_000).default(1_800_000),
@@ -82,6 +85,7 @@ interface ResolvedConfig {
   readonly notificationPollIntervalMs: number
   readonly notificationRequestTimeoutMs: number
   readonly replyGenerationTimeoutMs: number
+  readonly replyLengthRewriteAttempts: number
   readonly asrOptions: AsrOptions
   readonly uvExecutable: string
   readonly asrInstallTimeoutMs: number
@@ -217,7 +221,14 @@ export function apply(ctx: Context, config: Config = {}): void {
         resolved.notificationRequestTimeoutMs,
         data => console.info(`${LOG_PREFIX} /x/msgfeed/unread ${JSON.stringify(data)}`),
         context => console.info(`${LOG_PREFIX} comment context\n${context}`),
-        (context, signal, log) => generateReply(ctx, context, signal, resolved.replyGenerationTimeoutMs, log),
+        (context, signal, log) => generateReply(
+          ctx,
+          context,
+          signal,
+          resolved.replyGenerationTimeoutMs,
+          log,
+          resolved.replyLengthRewriteAttempts,
+        ),
         (kind, timestampMs, content) => console.info(
           `${LOG_PREFIX} [${String(timestampMs)}ms] ${kind} generated reply (posting next): ${JSON.stringify(content)}`,
         ),
@@ -272,6 +283,7 @@ function resolveConfig(config: Config): ResolvedConfig {
   const notificationPollIntervalMs = config.notificationPollIntervalMs ?? 60_000
   const notificationRequestTimeoutMs = config.notificationRequestTimeoutMs ?? 20_000
   const replyGenerationTimeoutMs = config.replyGenerationTimeoutMs ?? 120_000
+  const replyLengthRewriteAttempts = config.replyLengthRewriteAttempts ?? 2
   const asrPythonExecutable = config.asrPythonExecutable ?? DEFAULT_ASR_PYTHON_EXECUTABLE
   const asrCacheDir = config.asrCacheDir ?? DEFAULT_ASR_CACHE_DIR
   const asrTimeoutMs = config.asrTimeoutMs ?? 1_800_000
@@ -297,6 +309,9 @@ function resolveConfig(config: Config): ResolvedConfig {
   if (!Number.isSafeInteger(replyGenerationTimeoutMs) || replyGenerationTimeoutMs < 1_000 || replyGenerationTimeoutMs > 300_000) {
     throw new TypeError('dsh-kydon-bilibili: replyGenerationTimeoutMs must be an integer from 1000 to 300000')
   }
+  if (!Number.isSafeInteger(replyLengthRewriteAttempts) || replyLengthRewriteAttempts < 0 || replyLengthRewriteAttempts > 5) {
+    throw new TypeError('dsh-kydon-bilibili: replyLengthRewriteAttempts must be an integer from 0 to 5')
+  }
   if (!Number.isSafeInteger(asrTimeoutMs) || asrTimeoutMs < 10_000 || asrTimeoutMs > 14_400_000) {
     throw new TypeError('dsh-kydon-bilibili: asrTimeoutMs must be an integer from 10000 to 14400000')
   }
@@ -312,6 +327,7 @@ function resolveConfig(config: Config): ResolvedConfig {
     notificationPollIntervalMs,
     notificationRequestTimeoutMs,
     replyGenerationTimeoutMs,
+    replyLengthRewriteAttempts,
     asrOptions: {
       pythonExecutable: asrPythonExecutable,
       workerPath: ASR_WORKER_PATH,
