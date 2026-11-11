@@ -53,6 +53,7 @@ The profile patch mounts the plugin with the defaults below; change these values
 | `notificationPollIntervalMs` | `60000` | Delay between checks, from `10000` to `3600000` ms; the first check starts as soon as setup is ready. |
 | `notificationRequestTimeoutMs` | `20000` | Request timeout, from `1000` to `120000` ms. |
 | `replyGenerationTimeoutMs` | `120000` | Maximum model-generation duration, from `1000` to `300000` ms. |
+| `replyLengthRewriteAttempts` | `2` | Additional model rewrites after an oversized draft, from `0` to `5`. |
 | `asrPythonExecutable` | Platform-specific Python in the plugin's `.venv` | Python environment created by `uv sync`; override it when the environment is elsewhere. |
 | `uvExecutable` | `uv` | uv command or absolute executable path used after the user approves setup. |
 | `asrInstallTimeoutMs` | `1800000` | Maximum consented dependency-install duration, from `60000` to `7200000` ms. |
@@ -158,7 +159,7 @@ Read the source files for the complete request and lifecycle details.
 
 #### What the model sees
 
-Each unhandled notification with usable context creates one isolated Agent Session. The model sees the article body for article comments, timestamped text transcribed from video audio, and the relevant timestamped thread or current @ comment. The Session system prompt asks the model to write a concise Simplified Chinese reply of no more than 1,000 characters. The notification context and assistant output are recorded as messages. Tool calls are denied for this Agent.
+Each unhandled notification with usable context creates one isolated Agent Session. The model sees the article body for article comments, timestamped text transcribed from video audio, and the relevant timestamped thread or current @ comment. The Session system prompt asks for a concise Simplified Chinese reply of no more than 1,000 characters and targets 900 characters when rewriting. If a draft exceeds 1,000 UTF-16 code units, the Agent receives up to `replyLengthRewriteAttempts` additional rewrite requests. The plugin rejects an oversized result before reporting it as ready to post and checks again immediately before `/x/v2/reply/add`. The notification context and assistant output are recorded as messages. Tool calls are denied for this Agent.
 
 #### Token effect
 
@@ -174,7 +175,7 @@ The poller only handles comment @ and reply notifications.
 
 - Notification polling stays paused until the user approves ASR dependency installation in the plugin settings card; deferring or failing setup also pauses article replies.
 - Bilibili API or local-state errors stop the current poll; the next scheduled poll retries saved pending notifications and scans both feeds again.
-- The 1,000-character reply limit is a prompt instruction, not a posting-time check; longer output can be rejected by Bilibili and retried on the next poll.
+- If the model still exceeds 1,000 UTF-16 code units after the configured rewrites, the current attempt is skipped and the notification remains pending for a later poll.
 - The first saved feed checkpoint cannot recover notifications already read before that baseline; later read-before-poll recovery depends on Bilibili continuing to return those entries in the feed.
 - Multiple Host processes sharing one plugin data directory can race and send duplicate replies.
 - The local deduplication file grows with the number of handled comments.
