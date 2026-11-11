@@ -83,6 +83,7 @@ export async function generateReply(
     signal: generationSignal,
     agentOptions: selection,
     setup: async (agentCtx, agent) => {
+      let completeSystemPrompt = systemPrompt
       if (agentPresetId !== undefined) {
         await ctx.agentPresets.mount(agentCtx, agentPresetId)
         if (kind === 'video-summary') {
@@ -94,12 +95,7 @@ export async function generateReply(
           if (skill === undefined || !isModelInvocable(skill)) {
             throw new Error(`Required DSH skill "${VIDEO_SUMMARY_SKILL_NAME}" is not available to Agent preset "${agentPresetId}".`)
           }
-          agentCtx.systemPrompt.section({
-            name: `${PLUGIN_NAME}:video-summary-skill`,
-            order: 1,
-            complete: true,
-            text: renderSkillContent(skill),
-          })
+          completeSystemPrompt = buildVideoSummarySystemPrompt(skill)
           log.write('已预加载视频总结技能', `${skill.name} (${skill.provider})`)
           videoSummarySkillLoaded = true
         }
@@ -108,7 +104,7 @@ export async function generateReply(
         name: `${PLUGIN_NAME}:${kind}-policy`,
         order: 0,
         complete: true,
-        text: systemPrompt,
+        text: completeSystemPrompt,
       })
       agentCtx.tools.presentAs('native')
       agentCtx.tools.restrict({ allow: [] })
@@ -236,7 +232,7 @@ export async function generateReply(
 }
 
 
-/** Generate a summary comment after the model loads the required `cc-summary` skill.
+/** Generate a summary comment with `cc-summary` preloaded at the start of the system prompt.
  * @param ctx - Host context providing Agent and model-selection services.
  * @param prompt - video metadata and timestamped transcript.
  * @param signal - plugin-lifetime signal that cancels generation during unload.
@@ -255,6 +251,10 @@ export function generateVideoSummaryComment(
   maxLengthRewrites: number,
 ): Promise<string> {
   return generateReply(ctx, prompt, signal, timeoutMs, log, maxLengthRewrites, 'video-summary')
+}
+
+function buildVideoSummarySystemPrompt(skill: Parameters<typeof renderSkillContent>[0]): string {
+  return [renderSkillContent(skill), VIDEO_SUMMARY_SYSTEM_PROMPT].join('\n\n')
 }
 
 function rewritePrompt(kind: 'reply' | 'video-summary'): string {
