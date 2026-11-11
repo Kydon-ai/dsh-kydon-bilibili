@@ -3,9 +3,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -72,13 +72,12 @@ export async function generateReply(
   if (kind === 'video-summary' && agentPresetId === undefined) {
     throw new Error('Video summary generation requires a default Agent preset.')
   }
-  const skillBasePath = kind === 'video-summary' ? dshHomePath('skills', VIDEO_SUMMARY_SKILL_NAME) : undefined
-  const skillPath = skillBasePath === undefined ? undefined : join(skillBasePath, 'SKILL.md')
-  const skillText = skillPath === undefined ? undefined : await readRequiredSkill(skillPath)
-  const completeSystemPrompt = skillText === undefined || skillBasePath === undefined
+  const skillPath = fileURLToPath(new URL(`../skills/${VIDEO_SUMMARY_SKILL_NAME}/SKILL.md`, import.meta.url))
+  const skill = kind === 'video-summary' ? await readRequiredSkill(skillPath) : undefined
+  const completeSystemPrompt = skill === undefined
     ? systemPrompt
-    : buildVideoSummarySystemPrompt(skillText, skillBasePath)
-  if (skillPath !== undefined) log.write('已预加载视频总结技能', skillPath)
+    : buildVideoSummarySystemPrompt(skill.content, skill.basePath)
+  if (skill !== undefined) log.write('已预加载视频总结技能', skill.path)
   const sessionId = brandString<SessionId>(`bilibili-${kind}-${randomUUID()}`)
   log.write('模型会话', JSON.stringify({ sessionId, ...selection }, null, 2))
   log.write('模型输入：公开评论规则', systemPrompt)
@@ -241,15 +240,18 @@ export function generateVideoSummaryComment(
   return generateReply(ctx, prompt, signal, timeoutMs, log, maxLengthRewrites, 'video-summary')
 }
 
-async function readRequiredSkill(path: string): Promise<string> {
+async function readRequiredSkill(path: string): Promise<{ path: string; basePath: string; content: string }> {
+  let content: string
   try {
-    const content = await readFile(path, 'utf8')
-    if (content.trim().length === 0) throw new Error('file is empty')
-    return content
+    content = await readFile(path, 'utf8')
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    throw new Error(`Could not load required local skill "${VIDEO_SUMMARY_SKILL_NAME}" from "${path}": ${detail}`)
+    throw new Error(`Could not read required project skill "${VIDEO_SUMMARY_SKILL_NAME}" at "${path}": ${detail}`)
   }
+  if (content.trim().length === 0) {
+    throw new Error(`Required project skill "${VIDEO_SUMMARY_SKILL_NAME}" is empty: "${path}"`)
+  }
+  return { path, basePath: dirname(path), content }
 }
 
 function buildVideoSummarySystemPrompt(skillText: string, skillBasePath: string): string {
