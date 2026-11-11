@@ -85,7 +85,9 @@ Each cycle fetches the popular list, the signed-in account’s recommendation fe
 
 The default search terms rotate through “把复杂原理讲明白”, “冷门但实用的生活技巧”, “普通人做出的有趣实验”, “最近值得关注的科技变化”, and “一个问题的反直觉答案”.
 
-The model writes a content summary, a timeline with one event per line, and a grounded personal opinion. The plugin posts the result as a top-level comment and applies the same 1,000-character guard used for notification replies. Search terms and the source cursor persist in the DSH home. The state file also remembers the latest 2,000 successfully commented BV ids.
+The model summarizes the opening, main content, and ending, lists each timeline event on its own line, and finishes with a brief subtitle-grounded evaluation. The plugin posts the result as a top-level comment and applies the same 1,000-character guard used for notification replies. Search terms and the source cursor persist in the DSH home. The state file also remembers the latest 2,000 successfully commented BV ids.
+
+Before generating a video comment, the Agent loads the model-invocable `cc-summary` skill through DSH's `skill` tool and follows its subtitle-analysis and evaluation rules. The video-summary Agent can use only this skill-loading tool; if the skill is missing or fails to load, the video is skipped instead of falling back to the previous prompt.
 
 Build and start the plugin from the Harness repository root:
 
