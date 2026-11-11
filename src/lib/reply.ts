@@ -2,14 +2,15 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { brandString } from '@deepseek-ai/dsh-brand'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { isModelInvocable, renderSkillContent } from '@deepseek-ai/dsh-skill'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type { ConversationLog } from './conversation-log.ts'
@@ -51,7 +52,7 @@ const VIDEO_SUMMARY_SYSTEM_PROMPT = [
  * @param timeoutMs - maximum duration of model generation.
  * @param log - per-notification log for model input and available output.
  * @param maxLengthRewrites - maximum additional model rewrites for oversized drafts.
- * @param kind - comment policy to apply; video summaries join the default preset to load `cc-summary`.
+ * @param kind - comment policy to apply; video summaries read and prepend the local `cc-summary` skill.
  * @returns the assistant's final text reply.
  * @throws when generation fails, output extraction fails, or rewrites cannot meet the reply limit.
  */
@@ -69,36 +70,28 @@ export async function generateReply(
   const selection = ctx.agentDefaultModel.currentSelection()
   const agentPresetId = kind === 'video-summary' ? ctx.agentPresets.defaultId : undefined
   if (kind === 'video-summary' && agentPresetId === undefined) {
-    throw new Error('Video summary generation requires a default Agent preset to load its skill provider.')
+    throw new Error('Video summary generation requires a default Agent preset.')
   }
+  const skillBasePath = kind === 'video-summary' ? dshHomePath('skills', VIDEO_SUMMARY_SKILL_NAME) : undefined
+  const skillPath = skillBasePath === undefined ? undefined : join(skillBasePath, 'SKILL.md')
+  const skillText = skillPath === undefined ? undefined : await readRequiredSkill(skillPath)
+  const completeSystemPrompt = skillText === undefined || skillBasePath === undefined
+    ? systemPrompt
+    : buildVideoSummarySystemPrompt(skillText, skillBasePath)
+  if (skillPath !== undefined) log.write('已预加载视频总结技能', skillPath)
   const sessionId = brandString<SessionId>(`bilibili-${kind}-${randomUUID()}`)
   log.write('模型会话', JSON.stringify({ sessionId, ...selection }, null, 2))
   log.write('模型输入：公开评论规则', systemPrompt)
   const timeoutSignal = AbortSignal.timeout(timeoutMs)
   const generationSignal = AbortSignal.any([signal, timeoutSignal])
-  let videoSummarySkillLoaded = false
   const handle = await ctx.agents.create({
     sessionId,
     ...agentPresetId === undefined ? {} : { meta: { agentPreset: agentPresetId } },
     signal: generationSignal,
     agentOptions: selection,
-    setup: async (agentCtx, agent) => {
-      let completeSystemPrompt = systemPrompt
+    setup: async (agentCtx) => {
       if (agentPresetId !== undefined) {
         await ctx.agentPresets.mount(agentCtx, agentPresetId)
-        if (kind === 'video-summary') {
-          const skill = await agentCtx.skills.get(VIDEO_SUMMARY_SKILL_NAME, {
-            cwd: agent.session.header.cwd,
-            signal: generationSignal,
-            scope: agent,
-          })
-          if (skill === undefined || !isModelInvocable(skill)) {
-            throw new Error(`Required DSH skill "${VIDEO_SUMMARY_SKILL_NAME}" is not available to Agent preset "${agentPresetId}".`)
-          }
-          completeSystemPrompt = buildVideoSummarySystemPrompt(skill)
-          log.write('已预加载视频总结技能', `${skill.name} (${skill.provider})`)
-          videoSummarySkillLoaded = true
-        }
       }
       agentCtx.systemPrompt.section({
         name: `${PLUGIN_NAME}:${kind}-policy`,
@@ -133,11 +126,6 @@ export async function generateReply(
     }))
     await handle.agent.whenIdle()
     generationSignal.throwIfAborted()
-    if (kind === 'video-summary') {
-      if (!videoSummarySkillLoaded) {
-        throw new Error(`The ${VIDEO_SUMMARY_SKILL_NAME} skill was not loaded before video summary generation.`)
-      }
-    }
     let responseSequence = -1
     const readReply = (): string => {
       const response = handle.agent.session.snapshotEvents().findLast(event => event.type === 'assistant/message')
@@ -253,8 +241,31 @@ export function generateVideoSummaryComment(
   return generateReply(ctx, prompt, signal, timeoutMs, log, maxLengthRewrites, 'video-summary')
 }
 
-function buildVideoSummarySystemPrompt(skill: Parameters<typeof renderSkillContent>[0]): string {
-  return [renderSkillContent(skill), VIDEO_SUMMARY_SYSTEM_PROMPT].join('\n\n')
+async function readRequiredSkill(path: string): Promise<string> {
+  try {
+    const content = await readFile(path, 'utf8')
+    if (content.trim().length === 0) throw new Error('file is empty')
+    return content
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`Could not load required local skill "${VIDEO_SUMMARY_SKILL_NAME}" from "${path}": ${detail}`)
+  }
+}
+
+function buildVideoSummarySystemPrompt(skillText: string, skillBasePath: string): string {
+  const skillInstructions = [
+    `<skill_content name="${VIDEO_SUMMARY_SKILL_NAME}">`,
+    '<skill_resources>',
+    `Base directory for this skill: ${skillBasePath}`,
+    'Resolve relative paths mentioned by this skill against the base directory before using them. Load referenced resources only as needed.',
+    '</skill_resources>',
+    '',
+    '<skill_instructions>',
+    skillText,
+    '</skill_instructions>',
+    '</skill_content>',
+  ].join('\n')
+  return [skillInstructions, VIDEO_SUMMARY_SYSTEM_PROMPT].join('\n\n')
 }
 
 function rewritePrompt(kind: 'reply' | 'video-summary'): string {
