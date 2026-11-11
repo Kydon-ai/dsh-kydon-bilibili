@@ -8,6 +8,15 @@ import type { ConversationLog } from './conversation-log.ts'
 
 const MAX_WORKER_OUTPUT_BYTES = 32 * 1024 * 1024
 const WORKER_GRACE_MS = 2_000
+let transcriptionLocked = false
+const transcriptionWaiters: TranscriptionWaiter[] = []
+
+interface TranscriptionWaiter {
+  readonly signal: AbortSignal
+  readonly resolve: (release: () => void) => void
+  readonly reject: (reason: unknown) => void
+  onAbort: () => void
+}
 
 /** Host settings needed to run the packaged ASR worker. */
 export interface AsrOptions {
@@ -52,6 +61,23 @@ export interface AsrCue {
  * @throws when a cache file cannot be read or the worker cannot start, times out, exceeds output limits, or returns invalid data.
  */
 export async function transcribeBilibiliVideo(
+  bvid: string,
+  page: number,
+  options: AsrOptions,
+  subprocess: SubprocessRuntime,
+  signal: AbortSignal,
+  log: ConversationLog,
+): Promise<AsrTranscript> {
+  const release = await acquireTranscriptionLock(signal)
+  try {
+    signal.throwIfAborted()
+    return await transcribeBilibiliVideoUnlocked(bvid, page, options, subprocess, signal, log)
+  } finally {
+    release()
+  }
+}
+
+async function transcribeBilibiliVideoUnlocked(
   bvid: string,
   page: number,
   options: AsrOptions,
@@ -147,6 +173,46 @@ export async function transcribeBilibiliVideo(
     lastSubtitleSeconds: transcript.cues.reduce((latest, cue) => Math.max(latest, cue.endMs), 0) / 1_000,
   }, null, 2))
   return transcript
+}
+
+function acquireTranscriptionLock(signal: AbortSignal): Promise<() => void> {
+  signal.throwIfAborted()
+  if (!transcriptionLocked) {
+    transcriptionLocked = true
+    return Promise.resolve(createTranscriptionRelease())
+  }
+  return new Promise((resolve, reject) => {
+    const waiter: TranscriptionWaiter = {
+      signal,
+      resolve,
+      reject,
+      onAbort: () => {
+        const index = transcriptionWaiters.indexOf(waiter)
+        if (index === -1) return
+        transcriptionWaiters.splice(index, 1)
+        signal.removeEventListener('abort', waiter.onAbort)
+        reject(signal.reason ?? new Error('Bilibili ASR was cancelled while waiting for another transcription.'))
+      },
+    }
+    transcriptionWaiters.push(waiter)
+    signal.addEventListener('abort', waiter.onAbort, { once: true })
+    if (signal.aborted) waiter.onAbort()
+  })
+}
+
+function createTranscriptionRelease(): () => void {
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const next = transcriptionWaiters.shift()
+    if (next === undefined) {
+      transcriptionLocked = false
+      return
+    }
+    next.signal.removeEventListener('abort', next.onAbort)
+    next.resolve(createTranscriptionRelease())
+  }
 }
 
 /** Read the subtitle previously written for one video page.
