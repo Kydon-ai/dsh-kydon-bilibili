@@ -1,5 +1,5 @@
 ---
-description: "配置 B 站二维码登录，并在 Host 组合中自动回复未读的 @ 通知和评论回复。"
+description: "配置 B 站二维码登录、未读评论通知自动回复和定时视频总结评论；模型会先读取本地转写字幕，再为已登录账号生成带时间轴的评论。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## Summary
 
-通过设置页二维码登录 B 站后，Host 会为未读的 @ 通知和评论回复生成并发送回复。设置卡片会先征求用户同意，再安装锁定的本地转写依赖；安装成功前暂停轮询。视频回复使用下载的音频和本地 Whisper 转写；锁文件和环境未变化时，安装标记会跳过后续安装。
+通过设置页二维码登录 B 站后，Host 会为未读的 @ 通知和评论回复生成并发送回复。启用视频评论后，它还会发现公开视频，先在本地转写，再发布带时间轴的总结评论。ASR 设置成功后才会启动这两个轮询器。
 
 ## 目录
 
@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 适用场景
 
-当已登录的 B 站账号需要自动发布模型生成的 @ 通知和评论回复时使用。插件不处理私信、点赞或系统通知。
+当已登录的 B 站账号需要自动回复未读 @ 和评论回复，并按默认设置每十分钟发布一条模型生成的视频总结评论时使用。设置 `videoCommentEnabled: false` 可停止视频评论，同时保留通知回复。
 
 ### 最小挂载配置
 
@@ -44,6 +44,9 @@ profile 补丁使用以下默认值挂载插件；可以在插件配置中修改
     notificationPollIntervalMs: 60000
     notificationRequestTimeoutMs: 20000
     replyGenerationTimeoutMs: 120000
+    videoCommentEnabled: true
+    videoCommentIntervalMs: 600000
+    videoCommentMaxPerRun: 1
 ```
 
 | 字段 | 默认值 | 含义 |
@@ -54,6 +57,12 @@ profile 补丁使用以下默认值挂载插件；可以在插件配置中修改
 | `notificationRequestTimeoutMs` | `20000` | 单个请求超时范围为 `1000` 到 `120000` 毫秒。 |
 | `replyGenerationTimeoutMs` | `120000` | 模型生成回复的最长时间，范围为 `1000` 到 `300000` 毫秒。 |
 | `replyLengthRewriteAttempts` | `2` | 回复超长后的额外模型重写次数，范围为 `0` 到 `5`。 |
+| `videoCommentEnabled` | `true` | ASR 设置就绪后发布视频总结评论；设为 `false` 可仅保留通知回复。 |
+| `videoCommentIntervalMs` | `600000` | 视频扫描间隔，范围为 `60000` 到 `3600000` 毫秒；ASR 设置就绪后立即执行首次扫描。 |
+| `videoCommentMaxPerRun` | `1` | 每轮尝试处理的视频数，范围为 `1` 到 `3`。 |
+| `videoCommentMaxDurationSeconds` | `1800` | 跳过已知时长超过该值的视频，范围为 `60` 到 `14400` 秒。 |
+| `videoCommentMaxTranscriptCharacters` | `40000` | 发送给模型的字幕字符上限，范围为 `5000` 到 `100000`；更长的字幕会按字幕顺序均匀抽样。 |
+| `videoCommentSearchTerms` | 五条默认中文搜索词 | 搜索 API 按顺序轮换使用；可配置 `1` 到 `20` 条非空搜索词。 |
 | `asrPythonExecutable` | 插件 `.venv` 中的平台对应 Python | `uv sync` 创建的 Python 环境；环境放在其他位置时可覆盖。 |
 | `uvExecutable` | `uv` | 用户同意安装后运行的 uv 命令或可执行文件绝对路径。 |
 | `asrInstallTimeoutMs` | `1800000` | 用户同意的依赖安装最长时间，范围为 `60000` 到 `7200000` 毫秒。 |
@@ -67,6 +76,16 @@ profile 补丁使用以下默认值挂载插件；可以在插件配置中修改
 处理每条视频通知时，插件从通知链接读取 BV 号和分 P，并先检查匹配的 SRT 缓存。缓存缺失或字幕无效时，才用 `yt-dlp` 下载对应音频，并用 `faster-whisper` 的 `small` 模型转写。插件不调用 B 站字幕接口；`yt-dlp` 会按下载流程请求解析和获取音频所需的媒体信息，并核对返回的 BV 号是否与通知链接一致。下载音频保存在 `.cache/audio/`；生成的 SRT 文件保存在 `.cache/subtitles/`，文件名包含 BV 号和分 P。后续通知会在下载音频前复用匹配且有效的字幕。Whisper 模型缓存到 `.cache/`。首次运行可能需要下载模型。转写先检测 CUDA，并使用配置的 `asrBatchSize`（默认 `32`）通过 `BatchedInferencePipeline` 尝试 GPU `float16` 批量转写。没有可用 CUDA 设备，或 GPU 模型初始化、批量推理失败时，会回退到 CPU `int8` 直接转写。`asr-worker.py` 使用公开视频地址，不读取插件登录 Cookie；需要登录、不可访问或受限的视频无法通过本地转写处理。
 
 启动插件前请先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)。在设置卡片中点击“安装”以同意在插件根目录运行 `uv sync --locked`。环境安装成功前，Host 会暂停通知轮询和回复；二维码登录仍可用。安装成功后，Host 会在 DSH 用户目录写入标记并立即开始轮询，无需重启。后续启动时，如果标记仍匹配 `uv.lock` 且插件 `.venv` 中的 Python 仍存在，就会跳过安装；锁文件改变或环境缺失时，卡片会显示安装操作。首次处理视频时会单独下载 Whisper 模型。`pyproject.toml` 声明依赖和 uv 项目设置，`uv.lock` 固定解析版本，`.python-version` 选择 Python 3.12。
+
+### 定时发布视频总结评论
+
+ASR 设置成功后，Host 会立即运行一次视频扫描，之后按 `videoCommentIntervalMs` 毫秒间隔继续扫描。若尚未保存 B 站登录凭据，本轮会等待下一次定时扫描。将 `videoCommentEnabled` 设为 `false` 可关闭该轮询器，同时保留通知回复。
+
+每轮会获取全站热门列表、当前账号的推荐列表，并使用下一条配置搜索词查询视频。来源游标会在热门、推荐和搜索之间轮换。默认每轮尝试处理一条视频；已知时长超过 `videoCommentMaxDurationSeconds` 的视频会跳过。模型会看到标题、简介以及缓存或新转写的字幕。字幕超过 `videoCommentMaxTranscriptCharacters` 时，插件会按字幕顺序均匀抽样。
+
+默认搜索词依次轮换：“把复杂原理讲明白”“冷门但实用的生活技巧”“普通人做出的有趣实验”“最近值得关注的科技变化”和“一个问题的反直觉答案”。
+
+模型生成内容总结、每个事件单独一行的时间轴，以及基于视频内容的个人观点。插件会将结果作为顶层评论发布，并使用与通知回复相同的 1000 字符长度检查。搜索词和来源游标保存在 DSH home 中。状态文件还会记录最近 2000 个已成功评论的视频 BV 号。
 
 从 Harness 仓库根目录编译并启动插件：
 
@@ -119,6 +138,10 @@ python -m unittest discover -s test -v
 <details>
 <summary>实现细节 — 点击展开</summary>
 
+Host 会在用户批准设置卡片安装并成功执行 `uv sync --locked` 后开始 `/x/msgfeed/unread` 轮询。DSH home 中的锁摘要标记可在锁文件和环境未变化时跳过后续安装。ASR 设置等待期间仍可扫码登录。设置就绪后，Host 先处理回复通知，再处理 @ 通知，并在终端打印未读数。专栏评论（`business_id=12`）带文章正文；视频评论（`business_id=1`）从通知 URL 读取 BV 号和分 P，下载音频并通过本地 `faster-whisper` 生成带时间戳 SRT。插件不调用 B 站字幕 API；`yt-dlp` 负责解析媒体并核对 BV 号。转写优先尝试 CUDA，遇到 GPU 不可用、模型加载或推理失败时回退到 CPU `int8`。音频和 SRT 保留在配置的缓存目录。回复通知包含根评论和此前的楼中楼；@ 通知只包含当前评论。评论时间使用 Unix 毫秒时间戳（楼中楼为 `ctime`，@ 为 `at_time`）。Host 将这些上下文交给独立 DSH Agent Session 和默认模型，禁止工具调用。插件打印上下文和回复时间戳，然后调用 `/x/v2/reply/add`。文章或转写不可用、视频标识不匹配、生成失败或返回空文本时会跳过该通知。日志记录视频、分 P、语言、字幕段数、时长、音频与 SRT 路径、设备及 CPU 回退原因。Cordis effect 管理安装、通知轮询和视频评论调度；卸载时取消并等待活动任务结束。
+
+ASR 设置就绪后，视频评论轮询器会与通知轮询同时启动。它会立即获取热门、个性化推荐和搜索结果，再按持久化的轮换顺序选择候选视频。流程复用现有的 BV 字幕缓存和本地 ASR worker，默认每轮生成并发布一条总结评论，并将成功评论的 BV 号写入 `video-summary-state.json`。共享的 ASR 队列会串行执行两个轮询器的转写任务，避免同时加载 Whisper 或争用字幕缓存。
+
 获取上下文失败时，插件只在警告日志中输出错误原因，不打印堆栈，并继续处理剩余通知。
 
 通知状态文件（`notification-handled.json`）会在获取通知后、读取上下文或调用模型前，先将通知写入待办队列。插件重启或 B 站未读数变化不会清除待办；只有 B 站接受回复后，插件才会移除待办并原子地保存已处理键，以便后续列表去重。上下文或模型生成失败时，待办会保留并在后续轮询重试。Host 每次轮询都会读取 @ 和回复列表，即使未读数为 0 也会保存各自最新通知的位置；后续轮询会将位置更新之后的通知加入待办，因此只要通知仍保留在列表中，轮询间被手动读掉的消息仍可处理。首次运行或从旧状态文件迁移时，当前未读数用于初始化待办，当前列表头部作为起点；在这个起点之前已经读过的历史消息无法与新通知区分。如果 B 站已接受回复，但本地状态写入失败，后续轮询仍可能重复发送。已处理键会随着评论数量增长。
@@ -134,6 +157,9 @@ python -m unittest discover -s test -v
 | [`src/lib/asr-setup.ts`](src/lib/asr-setup.ts) | 需要用户同意的 uv 安装、就绪标记和设置生命周期。 |
 | [`asr-worker.py`](asr-worker.py) | 下载分 P 音频，并用 GPU 优先、CPU 回退的 `faster-whisper` 生成字幕。 |
 | [`src/lib/reply.ts`](src/lib/reply.ts) | 独立 Agent Session 和模型生成的回复正文。 |
+| [`src/lib/bilibili-api.ts`](src/lib/bilibili-api.ts) | 已登录 B 站请求和顶层评论发布。 |
+| [`src/lib/video-discovery.ts`](src/lib/video-discovery.ts) | WBI 签名、热门、推荐和搜索列表。 |
+| [`src/lib/video-comments.ts`](src/lib/video-comments.ts) | 视频转写、总结生成、评论发布和去重。 |
 
 </details>
 
@@ -147,6 +173,8 @@ python -m unittest discover -s test -v
 - [`src/index.ts`](src/index.ts) — Host 插件配置和 effect。
 - [`src/lib/login.ts`](src/lib/login.ts) — 二维码登录和本地凭证。
 - [`src/lib/notifications.ts`](src/lib/notifications.ts) — 通知轮询和评论回复。
+- [`src/lib/video-comments.ts`](src/lib/video-comments.ts) — 视频转写和总结评论生命周期。
+- [`src/lib/video-discovery.ts`](src/lib/video-discovery.ts) — B 站热门、推荐和签名搜索。
 
 -----
 
@@ -159,17 +187,19 @@ python -m unittest discover -s test -v
 
 每条上下文可用且尚未处理的通知都会创建一个独立的 Agent Session。模型会看到专栏评论的文章正文、由视频音频转写得到的带时间轴文本，以及相关的带时间戳楼中楼对话或当前 @ 评论。Session 系统提示要求模型用简体中文生成不超过 1000 个字符的简洁回复，重写目标为 900 个字符。初稿超过 1000 个 UTF-16 代码单元时，Agent 会按 `replyLengthRewriteAttempts` 配置额外重写。插件会在报告回复准备发送前和调用 `/x/v2/reply/add` 前检查长度；超长结果不会发送。通知上下文和模型输出会记录为消息。该 Agent 的工具调用会被拒绝。
 
+视频总结评论使用独立的 Agent Session。模型会看到视频标题、简介和不超过 `videoCommentMaxTranscriptCharacters` 个字符的带时间戳字幕；必要时会按字幕顺序从全片均匀抽取字幕。系统提示要求输出三个部分，并让时间轴的每个事件单独占一行；工具调用会被拒绝。超长初稿会按同一重写次数设置重新生成，最终评论仍须通过 1000 字符检查。
+
 #### Token 影响
 
 文章正文或视频转写文本以及相关评论会进入每次模型请求。原文过长时可能超出当前模型的上下文限制，生成失败后插件会跳过该通知。
 
 #### KV Cache 影响
 
-每条通知使用新的 Session，因此后续回复不会带入之前通知的内容。稳定回复规则前缀能否由 Provider 复用由适配器决定。
+每条通知或视频都会使用新的 Session，因此后续回复和总结评论不会带入之前来源的内容。稳定策略前缀能否由 Provider 复用由适配器决定。
 
 ## 已知限制和后续工作
 
-轮询器只处理评论区的 @ 和回复通知。
+通知轮询器处理评论区的 @ 和回复通知。独立的视频评论器会直接发布公开评论，不会逐条征求确认。
 
 - 用户未在插件设置卡片同意安装 ASR 依赖前，通知轮询保持暂停；暂缓或安装失败时，专栏回复也会暂停。
 - B 站 API 或本地状态报错会终止当前轮询；下一次定时轮询会重试已保存的待办通知并重新扫描两个通知列表。
@@ -178,6 +208,10 @@ python -m unittest discover -s test -v
 - 多个 Host 进程共享同一个插件数据目录时可能并发处理并重复回复。
 - 本地去重文件会随已处理的评论数量增大。
 - 如果进程在 B 站接收回复后、本地状态保存前退出，可能会重复回复。
+- 视频评论默认启用并会直接发布，不经过人工审核；设置 `videoCommentEnabled: false` 可关闭。
+- 视频发现依赖 B 站的热门、推荐和搜索 API。接口变化或限流会跳过本轮；下一次定时扫描会重试。
+- 评论器使用可公开下载的音频，并跳过已知时长超过 `videoCommentMaxDurationSeconds` 的视频。较长字幕会被抽样，因此模型可能漏掉抽样片段之间的细节。
+- 视频状态只保留最近 2000 个成功评论的 BV 号。多个 Host 进程可能并发重复处理；若 B 站已接受评论但进程未保存状态就退出，也可能重复发布。
 - 配置了 Session 持久化后，每条回复的独立 Session 会在其运行中的 Agent 释放后继续保留。
 - 视频回复需要可下载的公开音频；本地 `small` 模型转写可能出现识别错误、遗漏，或在启用 GPU 批量转写时改变字幕分段。视频字幕接口不参与该流程。
 - 本地转写依赖 uv 管理的 Python 3.12 环境、`yt-dlp`、`faster-whisper` 和可下载的模型文件。GPU 运行需要当前 CTranslate2 环境能使用 CUDA；否则使用 CPU `int8`，速度可能较慢。下载或转写超时会跳过当前通知。
