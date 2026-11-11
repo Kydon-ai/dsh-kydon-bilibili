@@ -6,12 +6,11 @@ import { join } from 'node:path'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { transcribeBilibiliVideo, type AsrOptions } from './asr.ts'
 import { createConversationLog, type ConversationLog } from './conversation-log.ts'
-import { loggedFetch } from './http-log.ts'
+import { postBilibiliComment, requestBilibiliJson } from './bilibili-api.ts'
 import { readCredential, type BilibiliCredential } from './login.ts'
 import { assertReplyLength } from './reply-length.ts'
 
 const API_ORIGIN = 'https://api.bilibili.com'
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 const NOTIFICATION_STATE_FILE = 'notification-handled.json'
 
 type NotificationKind = 'at' | 'reply'
@@ -138,7 +137,7 @@ async function readUnreadCounts(
   requestTimeoutMs: number,
   requestLog: ConversationLog,
 ): Promise<{ at: number; reply: number; data: Readonly<Record<string, unknown>> }> {
-  const payload = await requestJson(
+  const payload = await requestBilibiliJson(
     `${API_ORIGIN}/x/msgfeed/unread?platform=web&build=0&mobi_app=web`,
     credential,
     signal,
@@ -331,7 +330,7 @@ async function readFeedPage(
     url.searchParams.set(kind === 'at' ? 'at_time' : 'reply_time', cursor.time)
   }
 
-  const payload = await requestJson(url.toString(), credential, signal, requestTimeoutMs, requestLog)
+  const payload = await requestBilibiliJson(url.toString(), credential, signal, requestTimeoutMs, requestLog)
   const root = requireRecord(payload, `${kind} response`)
   requireSuccess(root, `${kind} response`)
   const data = requireRecord(root.data, `${kind} data`)
@@ -484,7 +483,7 @@ async function fetchArticleContext(
 ): Promise<ArticleContext> {
   const url = new URL(`${API_ORIGIN}/x/article/view`)
   url.searchParams.set('id', articleId)
-  const payload = await requestJson(url.toString(), credential, signal, requestTimeoutMs, requestLog, log)
+  const payload = await requestBilibiliJson(url.toString(), credential, signal, requestTimeoutMs, requestLog, log)
   const root = requireRecord(payload, 'article response')
   requireSuccess(root, 'article response')
   const data = requireRecord(root.data, 'article data')
@@ -567,7 +566,7 @@ async function readReplyContext(
     url.searchParams.set('root', target.root)
     url.searchParams.set('pn', String(pageNumber))
     url.searchParams.set('ps', '20')
-    const payload = await requestJson(url.toString(), credential, signal, requestTimeoutMs, requestLog, log)
+    const payload = await requestBilibiliJson(url.toString(), credential, signal, requestTimeoutMs, requestLog, log)
     const response = requireRecord(payload, 'reply thread response')
     requireSuccess(response, 'reply thread response')
     const data = requireRecord(response.data, 'reply thread data')
@@ -723,59 +722,18 @@ async function replyToTarget(
   requestLog: ConversationLog,
   log: ConversationLog,
 ): Promise<void> {
-  assertReplyLength(content)
-  const body = new URLSearchParams({
-    oid: target.oid,
-    type: String(target.businessId),
-    root: target.root,
-    parent: target.parent,
-    message: content,
-    csrf: credential.bili_jct,
-  })
-  const payload = await requestJson(`${API_ORIGIN}/x/v2/reply/add`, credential, signal, requestTimeoutMs, requestLog, log, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-    body,
-  })
-  const root = requireRecord(payload, 'reply response')
-  requireSuccess(root, 'reply response')
-}
-
-/** Make one authenticated API request without exposing cookie values in errors. */
-async function requestJson(
-  url: string,
-  credential: BilibiliCredential,
-  signal: AbortSignal,
-  requestTimeoutMs: number,
-  requestLog: ConversationLog,
-  conversationLog?: ConversationLog,
-  init: Omit<RequestInit, 'headers' | 'signal'> & { headers?: HeadersInit } = {},
-): Promise<unknown> {
-  const headers = new Headers(init.headers)
-  headers.set('Cookie', cookieHeader(credential))
-  headers.set('User-Agent', USER_AGENT)
-  headers.set('Referer', 'https://message.bilibili.com/')
-  const response = await loggedFetch(url, {
-    ...init,
-    headers,
-    signal: AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]),
-    cache: 'no-store',
-  }, requestLog, conversationLog)
-  if (!response.ok) throw new Error(`Bilibili request failed with HTTP ${String(response.status)}.`)
-  return parseExactJson(await response.text())
-}
-
-/** Keep large integer IDs exact when Node supplies the JSON source context. */
-function parseExactJson(text: string): unknown {
-  type JsonContext = { readonly source: string }
-  type SourceAwareReviver = (this: unknown, key: string, value: unknown, context: JsonContext) => unknown
-  const parse = JSON.parse as unknown as (source: string, reviver: SourceAwareReviver) => unknown
-  return parse(text, (_key, value, context) => {
-    if (typeof value === 'number' && !Number.isSafeInteger(value) && /^-?\d+$/.test(context.source)) {
-      return context.source
-    }
-    return value
-  })
+  await postBilibiliComment(
+    target.oid,
+    target.businessId,
+    target.root,
+    target.parent,
+    content,
+    credential,
+    signal,
+    requestTimeoutMs,
+    requestLog,
+    log,
+  )
 }
 
 function readNotificationState(stateDir: string): NotificationState {
@@ -949,15 +907,6 @@ function isPendingNotification(value: unknown): value is PendingNotification {
   return timestampMs === undefined || (
     typeof timestampMs === 'number' && Number.isSafeInteger(timestampMs) && timestampMs >= 0
   )
-}
-
-function cookieHeader(credential: BilibiliCredential): string {
-  return [
-    `SESSDATA=${credential.sessdata}`,
-    `bili_jct=${credential.bili_jct}`,
-    ...(credential.buvid3.length > 0 ? [`buvid3=${credential.buvid3}`] : []),
-    ...(credential.dedeuserid.length > 0 ? [`DedeUserID=${credential.dedeuserid}`] : []),
-  ].join('; ')
 }
 
 function requireSuccess(root: Record<string, unknown>, subject: string): void {

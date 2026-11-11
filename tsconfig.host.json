@@ -8,6 +8,7 @@
   "files": [
     "src/index.ts",
     "src/lib/conversation-log.ts",
+    "src/lib/bilibili-api.ts",
     "src/lib/http-log.ts",
     "src/lib/login.ts",
     "src/lib/notifications.ts",
