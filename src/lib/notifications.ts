@@ -8,6 +8,7 @@ import { transcribeBilibiliVideo, type AsrOptions } from './asr.ts'
 import { createConversationLog, type ConversationLog } from './conversation-log.ts'
 import { loggedFetch } from './http-log.ts'
 import { readCredential, type BilibiliCredential } from './login.ts'
+import { assertReplyLength } from './reply-length.ts'
 
 const API_ORIGIN = 'https://api.bilibili.com'
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
@@ -282,6 +283,7 @@ async function processPendingNotifications(
       content = await generateReply(context, signal, log)
       signal.throwIfAborted()
       if (content.trim().length === 0) throw new Error('Reply generator returned empty text.')
+      assertReplyLength(content)
     } catch (error) {
       log.write('模型生成失败', errorMessage(error))
       if (signal.aborted) throw error
@@ -721,6 +723,7 @@ async function replyToTarget(
   requestLog: ConversationLog,
   log: ConversationLog,
 ): Promise<void> {
+  assertReplyLength(content)
   const body = new URLSearchParams({
     oid: target.oid,
     type: String(target.businessId),
