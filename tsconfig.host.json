@@ -13,7 +13,8 @@
     "src/lib/notifications.ts",
     "src/lib/asr.ts",
     "src/lib/asr-setup.ts",
-    "src/lib/reply.ts"
+    "src/lib/reply.ts",
+    "src/lib/reply-length.ts"
   ],
   "references": [
     { "path": "../vendor/cordis" },
