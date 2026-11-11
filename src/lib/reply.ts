@@ -79,9 +79,11 @@ export async function generateReply(
     setup: async (agentCtx, agent) => {
       if (agentPresetId !== undefined) {
         await ctx.agentPresets.mount(agentCtx, agentPresetId)
-        if (agentCtx.tools.get('skill', agent) === undefined) {
+        const skillTool = agentCtx.tools.get('skill', agent)
+        if (skillTool === undefined) {
           throw new Error(`Agent preset "${agentPresetId}" does not provide the DSH skill tool.`)
         }
+        agentCtx.tools.register(skillTool)
       }
       agentCtx.systemPrompt.section({
         name: `${PLUGIN_NAME}:${kind}-policy`,
@@ -91,6 +93,9 @@ export async function generateReply(
       })
       agentCtx.tools.presentAs('native')
       agentCtx.tools.restrict({ allow: [] })
+      if (agentPresetId !== undefined && agentCtx.tools.get('skill', agent) === undefined) {
+        throw new Error('The DSH skill tool is not visible to the video-summary Agent after tool restrictions.')
+      }
       agentCtx.tools.guard(exec => (
         kind === 'video-summary' && exec.name === 'skill'
           ? undefined
