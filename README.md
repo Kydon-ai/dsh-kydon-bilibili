@@ -3,35 +3,72 @@ description: "Configures Bilibili QR login, automatic replies to unread comment 
 kind: "package-reference"
 ---
 
-# @kydon/dsh-kydon-bilibili
+<h1 align="center">@kydon/dsh-kydon-bilibili</h1>
 
-English | [中文](README.zh.md)
+<p align="center"><em>QR login, automatic notification replies, and local video summaries for DSH.</em></p>
 
-## Summary
+<p align="center">
+  <img src="assets/bilibili-plugin-icon.png" alt="Bilibili DSH plugin icon" width="144" />
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@kydon/dsh-kydon-bilibili"><img src="https://img.shields.io/npm/v/%40kydon%2Fdsh-kydon-bilibili?label=npm" alt="npm version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/DSH-Web-4c8bf5" alt="DSH Web" />
+  <img src="https://img.shields.io/badge/ASR-faster--whisper%20small-00a9b7" alt="Local ASR with faster-whisper small" />
+  <img src="https://img.shields.io/badge/Codex-assisted-6f42c1" alt="Codex assisted" />
+</p>
+
+<p align="center">English | <a href="README.zh.md">中文</a></p>
+
+<a id="summary"></a>
+## 1. Summary
 
 Sign in to Bilibili with the settings QR card, then let the Host reply to unread @ notifications and comment replies. When enabled, it also discovers public videos and posts a timestamped summary comment after local transcription. ASR setup must succeed before either poller starts.
 
+<a id="features"></a>
+## 2. Features
+
+- **QR sign-in:** Link a Bilibili account from the DSH settings card.
+- **Notification replies:** Poll unread @ and comment-reply notifications, keep pending items across retries, and avoid handling the same item twice. Generated replies are checked against Bilibili's 1,000-character limit before sending.
+- **Local video transcription:** Download audio from accessible public videos and transcribe it with `faster-whisper` `small`. GPU batch inference is preferred when CUDA is available; CPU transcription is the fallback. SRT subtitles are cached by BV id and page for reuse.
+- **Scheduled video summaries:** Rotate through popular, recommended, and search feeds, use the bundled `cc-summary` skill to draft timestamped summaries, and post a top-level comment. Video comments are enabled by default; set `videoCommentEnabled: false` to turn them off.
+- **Consent-based ASR setup:** Approve the local `uv` environment setup from the settings card. The Whisper model is downloaded separately when transcription first needs it.
+
+<a id="install"></a>
+## 3. Install
+
+Add the package to a DSH profile:
+
+```powershell
+dsh plugin --profile web add @kydon/dsh-kydon-bilibili
+```
+
 ## Table of Contents
 
-- [Use this package](#use-this-package)
-- [Understand the implementation](#understand-the-implementation)
-- [Further Exploration](#further-exploration)
-- [Model Experience](#model-experience)
-- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
-- [Dev Note](#dev-note)
+- [1. Summary](#summary)
+- [2. Features](#features)
+- [3. Install](#install)
+- [4. Use this package](#use-this-package)
+- [5. Understand the implementation](#understand-the-implementation)
+- [6. Further Exploration](#further-exploration)
+- [7. Model Experience](#model-experience)
+- [8. Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [8.1 Dev Note](#dev-note)
+- [9. Acknowledgements](#acknowledgements)
 
 -----
 
 <a id="use-this-package"></a>
-## Use this package
+## 4. Use this package
 
 Mount this plugin in the Host composition that owns the Bilibili login card.
 
-### When to choose it
+### 4.1 When to choose it
 
 Use it when a signed-in Bilibili account should automatically reply to unread @ and comment-reply notifications and, by default, post one model-generated video summary every ten minutes. Set `videoCommentEnabled: false` to stop video comments while notification replies continue.
 
-### Minimal mount configuration
+### 4.2 Minimal mount configuration
 
 The profile patch mounts the plugin with the defaults below; change these values in the plugin config.
 
@@ -71,13 +108,13 @@ The profile patch mounts the plugin with the defaults below; change these values
 | `asrBatchSize` | `32` | GPU transcription batch size, from `1` to `64`; CPU fallback uses direct transcription. |
 | `logDir` | Plugin's `log/` directory | Directory for notification logs; relative paths resolve from the Host working directory. |
 
-### Enable local video transcription
+### 4.3 Enable local video transcription
 
 For each video notification, the plugin reads the BV id and page from the notification URL and checks the matching SRT cache first. On a cache miss or invalid subtitle, it downloads that page's audio with `yt-dlp` and transcribes it with the `faster-whisper` `small` model. The plugin does not call Bilibili subtitle APIs; `yt-dlp` makes the media-resolution requests needed to download audio and checks that the returned BV id matches the notification URL. Downloaded audio stays in `.cache/audio/`; generated SRT files stay in `.cache/subtitles/` with filenames containing the BV id and page. Later notifications reuse a valid matching subtitle before downloading audio. The Whisper model is cached in `.cache/`. The first run may download the model. Transcription checks for CUDA and tries GPU `float16` through `BatchedInferencePipeline` using the configured `asrBatchSize`, which defaults to `32`. If no CUDA device is available, or GPU model initialization or batched inference fails, it retries on CPU with `int8` using direct transcription. `asr-worker.py` uses the public video URL and does not read the plugin's login cookies; videos that require login, are inaccessible, or are otherwise restricted cannot use this local transcription path.
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) before starting the plugin. Select **Install** on the settings card to approve `uv sync --locked` in the plugin root. Notification polling and replies stay paused until setup succeeds; QR login remains available. After a successful install, the Host writes a marker under the DSH home directory and starts polling without a restart. Later starts skip installation when the marker matches `uv.lock` and the plugin `.venv` Python still exists; a changed lock or missing environment returns the card to the install state. The first video transcription downloads the Whisper model separately. `pyproject.toml` declares dependencies and uv project settings, `uv.lock` pins resolved versions, and `.python-version` selects Python 3.12.
 
-### Automatic video summary comments
+### 4.4 Automatic video summary comments
 
 After ASR setup succeeds, the Host runs one video scan immediately and then starts another every `videoCommentIntervalMs` milliseconds. If no Bilibili credential is saved, the scan waits for the next interval. Set `videoCommentEnabled` to `false` to disable this poller without stopping notification replies.
 
@@ -102,7 +139,7 @@ Open the plugin's settings card and approve dependency installation. After sign-
 
 CUDA availability depends on CTranslate2's device detection and model loading; installing an NVIDIA driver alone does not guarantee that the Python environment can load the CUDA runtime. The transcription log records the selected device, CPU fallback reason, and audio/SRT paths. Reprocessing the same video page overwrites its audio and subtitle files; remove files in `.cache/audio/` and `.cache/subtitles/` when they are no longer needed.
 
-### Rebuild after changing source
+### 4.5 Rebuild after changing source
 
 Run this command from the repository root after editing files under `src/`:
 
@@ -112,7 +149,7 @@ pnpm --filter @kydon/dsh-kydon-bilibili bundle
 
 The script compiles the Host and Client TypeScript projects, then rebuilds `lib/index.js` and `lib/client.js`. Stop and restart the running `dsh web` process to load the new bundles; `pnpm install` does not rebuild this plugin.
 
-### Test audio transcription
+### 4.6 Test audio transcription
 
 Run the deterministic unit tests with Python's standard library; the tests replace `yt-dlp` and Whisper with fakes, so they do not contact Bilibili, load a model, or use the GPU:
 
@@ -128,7 +165,7 @@ To compare direct transcription, increasing `BatchedInferencePipeline` batch siz
 
 The benchmark doubles the batch size until the audio's VAD clip limit or configured maximum; after a CUDA out-of-memory result, it binary-searches the last safe interval. It prints aggregate timings, cue counts, and transcript-match flags without printing or saving recognized text. It requires a working CTranslate2 CUDA runtime; it reports when the GPU is visible but cannot run inference and does not install or change Python dependencies.
 
-### View notification logs
+### 4.7 View notification logs
 
 Each unhandled notification attempt creates a UTF-8 `.log` file in `dsh-kydon-bilibili/log/` by default. The filename contains the millisecond start time, notification type, comment ID, and a unique ID. A retry creates a new file. The log records the notification, context retrieval, model input and output, provider-returned reasoning when available, and the result of posting the reply. Context failures also receive a file. The plugin does not write login credentials to these files. If a log write fails before posting, that reply is skipped.
 
@@ -137,7 +174,7 @@ Each plugin instance also creates a `*-requests-*.log` file. It records incoming
 -----
 
 <a id="understand-the-implementation"></a>
-## Understand the implementation
+## 5. Understand the implementation
 
 <details>
 <summary>Implementation details — click to expand</summary>
@@ -170,7 +207,7 @@ The notification state file (`notification-handled.json`) stores each newly fetc
 -----
 
 <a id="further-exploration"></a>
-## Further Exploration
+## 6. Further Exploration
 
 Read the source files for the complete request and lifecycle details.
 
@@ -183,25 +220,25 @@ Read the source files for the complete request and lifecycle details.
 -----
 
 <a id="model-experience"></a>
-## Model Experience
+## 7. Model Experience
 
-### Request context and condition
+### 7.1 Request context and condition
 
-#### What the model sees
+#### 7.1.1 What the model sees
 
 Each unhandled notification with usable context creates one isolated Agent Session. The model sees the article body for article comments, timestamped text transcribed from video audio, and the relevant timestamped thread or current @ comment. The Session system prompt asks for a concise Simplified Chinese reply of no more than 1,000 characters and targets 900 characters when rewriting. If a draft exceeds 1,000 UTF-16 code units, the Agent receives up to `replyLengthRewriteAttempts` additional rewrite requests. The plugin rejects an oversized result before reporting it as ready to post and checks again immediately before `/x/v2/reply/add`. The notification context and assistant output are recorded as messages. Tool calls are denied for this Agent.
 
 Video summary comments use a separate Agent Session. It sees the video title, description, and up to `videoCommentMaxTranscriptCharacters` of timestamped transcript, sampled in transcript order when needed. The system prompt requires the three sections and one timestamped event per timeline line; tool calls are denied. Oversized drafts receive the same configured rewrite attempts and the final comment must pass the 1,000-character check.
 
-#### Token effect
+#### 7.1.2 Token effect
 
 The article body or transcript and relevant comment messages enter each model request. Long source content can exceed the selected model's context limit; generation then fails and the plugin skips that notification.
 
-#### KV Cache effect
+#### 7.1.3 KV Cache effect
 
 Each notification or video uses a new Session, so earlier source content does not enter later replies or summary comments. Provider-side reuse of the stable policy prefix is adapter-owned.
 
-## Known Limitations and Deferred Work
+## 8. Known Limitations and Deferred Work
 
 The notification poller handles comment @ and reply notifications. The separate video commenter publishes public comments without a per-comment approval step.
 
@@ -223,6 +260,19 @@ The notification poller handles comment @ and reply notifications. The separate 
 - The HTTP log grows until the plugin stops; a restart creates a new file. Its redacted parameters must be supplied separately when replaying a request.
 
 <a id="dev-note"></a>
-### Dev Note
+### 8.1 Dev Note
 
 None.
+
+<a id="acknowledgements"></a>
+## 9. Acknowledgements
+
+This plugin was developed with reference to these Bilibili projects and API resources:
+
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — the plugin runtime and host platform this package targets.
+- [dsh-plugin-starter](https://github.com/lansi-ai/dsh-plugin-starter) — DSH plugin starter templates and Host/Client development guidance.
+- [dsh-bili-scroll](https://github.com/c1overzz/dsh-bili-scroll) — a related DSH Bilibili plugin used as a project and integration reference.
+- [dsh-bilibili-reply](https://github.com/bronyacccxz/dsh-bilibili-reply) — a DSH/AI Agent project for replying to Bilibili @ notifications with timestamped comments.
+- [bilibili-api-collect](https://github.com/bilibili-plugins/bilibili-api-collect) — API documentation consulted for QR login, WBI feeds, and request/response details.
+- [bilibili-video-transcriber](https://github.com/adolescen-he/bilibili-video-transcriber) — community subtitle-mismatch reproduction notes referenced during investigation.
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and [yt-dlp](https://github.com/yt-dlp/yt-dlp) — upstream projects used for local transcription and public-video audio downloads.

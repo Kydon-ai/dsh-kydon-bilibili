@@ -3,35 +3,72 @@ description: "配置 B 站二维码登录、未读评论通知自动回复和定
 kind: "package-reference"
 ---
 
-# @kydon/dsh-kydon-bilibili
+<h1 align="center">dsh-kydon-bilibili</h1>
 
-[English](README.md) | 中文
+<p align="center"><em>面向 DSH 的 B 站二维码登录、通知自动回复和本地视频总结插件。</em></p>
 
-## Summary
+<p align="center">
+  <img src="assets/bilibili-plugin-icon.png" alt="B 站 DSH 插件图标" width="144" />
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@kydon/dsh-kydon-bilibili"><img src="https://img.shields.io/npm/v/%40kydon%2Fdsh-kydon-bilibili?label=npm" alt="npm 版本" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="许可证：MIT" /></a>
+  <img src="https://img.shields.io/badge/DSH-Web-4c8bf5" alt="DSH Web" />
+  <img src="https://img.shields.io/badge/ASR-faster--whisper%20small-00a9b7" alt="本地 faster-whisper small 转写" />
+  <img src="https://img.shields.io/badge/Codex-assisted-6f42c1" alt="Codex 协助编写" />
+</p>
+
+<p align="center"><a href="README.md">English</a> | 中文</p>
+
+<a id="summary"></a>
+## 1. 简介
 
 通过设置页二维码登录 B 站后，Host 会为未读的 @ 通知和评论回复生成并发送回复。启用视频评论后，它还会发现公开视频，先在本地转写，再发布带时间轴的总结评论。ASR 设置成功后才会启动这两个轮询器。
 
+<a id="features"></a>
+## 2. 功能概览
+
+- **二维码登录：** 在 DSH 设置卡片中扫码登录 B 站账号。
+- **通知自动回复：** 轮询未读 @ 和评论回复；失败的待处理通知会保留以便重试，并对已处理通知去重。生成的回复在发送前会检查 B 站 1000 字符限制。
+- **本地视频转写：** 下载可访问的公开视频音频，使用 `faster-whisper` `small` 模型转写。CUDA 可用时优先 GPU 批量推理，失败时回退到 CPU。字幕按 BV 号和分 P 缓存以便复用。
+- **定时视频总结：** 轮换热门、推荐和搜索视频，调用随包提供的 `cc-summary` skill 生成带时间轴的总结，并发布为顶层评论。视频评论默认开启，可通过 `videoCommentEnabled: false` 关闭。
+- **用户确认本地环境：** 在设置卡片中同意后才安装 `uv` 转写环境；Whisper 模型在首次转写时另行下载。
+
+<a id="install"></a>
+## 3. 安装
+
+将插件添加到 DSH profile：
+
+```powershell
+dsh plugin --profile web add @kydon/dsh-kydon-bilibili
+```
+
 ## 目录
 
-- [使用这个插件](#use-this-package)
-- [了解实现](#understand-the-implementation)
-- [进一步阅读](#further-exploration)
-- [模型体验](#model-experience)
-- [已知限制和后续工作](#known-limitations-and-deferred-work)
-- [开发备注](#dev-note)
+- [1. 简介](#summary)
+- [2. 功能概览](#features)
+- [3. 安装](#install)
+- [4. 使用这个插件](#use-this-package)
+- [5. 了解实现](#understand-the-implementation)
+- [6. 进一步阅读](#further-exploration)
+- [7. 模型体验](#model-experience)
+- [8. 已知限制和后续工作](#known-limitations-and-deferred-work)
+- [8.1 开发备注](#dev-note)
+- [9. 致谢](#acknowledgements)
 
 -----
 
 <a id="use-this-package"></a>
-## 使用这个插件
+## 4. 使用这个插件
 
 将这个插件挂载到提供 B 站登录卡片的 Host 组合中。
 
-### 适用场景
+### 4.1 适用场景
 
 当已登录的 B 站账号需要自动回复未读 @ 和评论回复，并按默认设置每十分钟发布一条模型生成的视频总结评论时使用。设置 `videoCommentEnabled: false` 可停止视频评论，同时保留通知回复。
 
-### 最小挂载配置
+### 4.2 最小挂载配置
 
 profile 补丁使用以下默认值挂载插件；可以在插件配置中修改这些值。
 
@@ -71,13 +108,13 @@ profile 补丁使用以下默认值挂载插件；可以在插件配置中修改
 | `asrBatchSize` | `32` | GPU 转写的 batch 大小，范围为 `1` 到 `64`；CPU 回退使用直接转写。 |
 | `logDir` | 插件的 `log/` 目录 | 通知日志目录；相对路径相对于 Host 工作目录解析。 |
 
-### 启用本地视频转写
+### 4.3 启用本地视频转写
 
 处理每条视频通知时，插件从通知链接读取 BV 号和分 P，并先检查匹配的 SRT 缓存。缓存缺失或字幕无效时，才用 `yt-dlp` 下载对应音频，并用 `faster-whisper` 的 `small` 模型转写。插件不调用 B 站字幕接口；`yt-dlp` 会按下载流程请求解析和获取音频所需的媒体信息，并核对返回的 BV 号是否与通知链接一致。下载音频保存在 `.cache/audio/`；生成的 SRT 文件保存在 `.cache/subtitles/`，文件名包含 BV 号和分 P。后续通知会在下载音频前复用匹配且有效的字幕。Whisper 模型缓存到 `.cache/`。首次运行可能需要下载模型。转写先检测 CUDA，并使用配置的 `asrBatchSize`（默认 `32`）通过 `BatchedInferencePipeline` 尝试 GPU `float16` 批量转写。没有可用 CUDA 设备，或 GPU 模型初始化、批量推理失败时，会回退到 CPU `int8` 直接转写。`asr-worker.py` 使用公开视频地址，不读取插件登录 Cookie；需要登录、不可访问或受限的视频无法通过本地转写处理。
 
 启动插件前请先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)。在设置卡片中点击“安装”以同意在插件根目录运行 `uv sync --locked`。环境安装成功前，Host 会暂停通知轮询和回复；二维码登录仍可用。安装成功后，Host 会在 DSH 用户目录写入标记并立即开始轮询，无需重启。后续启动时，如果标记仍匹配 `uv.lock` 且插件 `.venv` 中的 Python 仍存在，就会跳过安装；锁文件改变或环境缺失时，卡片会显示安装操作。首次处理视频时会单独下载 Whisper 模型。`pyproject.toml` 声明依赖和 uv 项目设置，`uv.lock` 固定解析版本，`.python-version` 选择 Python 3.12。
 
-### 定时发布视频总结评论
+### 4.4 定时发布视频总结评论
 
 ASR 设置成功后，Host 会立即运行一次视频扫描，之后按 `videoCommentIntervalMs` 毫秒间隔继续扫描。若尚未保存 B 站登录凭据，本轮会等待下一次定时扫描。将 `videoCommentEnabled` 设为 `false` 可关闭该轮询器，同时保留通知回复。
 
@@ -102,7 +139,7 @@ pnpm dsh web --patch .\dsh-kydon-bilibili\cordis.yml
 
 GPU 是否可用由 CTranslate2 的 CUDA 设备检测和模型加载结果决定；已安装 NVIDIA 驱动并不保证当前 Python 环境中的 CUDA 运行库可用。转写结果会记录所用设备、CPU 回退原因以及音频和 SRT 文件路径。重复处理同一视频分 P 时会覆盖对应音频和字幕文件；不再需要时可手动删除 `.cache/audio/` 和 `.cache/subtitles/` 中的文件。
 
-### 修改源码后重新编译
+### 4.5 修改源码后重新编译
 
 在仓库根目录编辑 `src/` 下的文件后，运行：
 
@@ -112,7 +149,7 @@ pnpm --filter @kydon/dsh-kydon-bilibili bundle
 
 该脚本会编译 Host 和 Client 的 TypeScript 项目，然后重新生成 `lib/index.js` 和 `lib/client.js`。停止并重新启动正在运行的 `dsh web` 进程以加载新产物；`pnpm install` 不会重新编译这个插件。
 
-### 测试音频转写
+### 4.6 测试音频转写
 
 使用 Python 标准库运行确定性单元测试；测试会用替身替换 `yt-dlp` 和 Whisper，不会请求 B 站、加载模型或使用 GPU：
 
@@ -128,7 +165,7 @@ python -m unittest discover -s test -v
 
 基准会从 8 开始逐步加倍 batch size，直到达到音频的 VAD 片段数或命令行上限；发生 CUDA 显存不足时，会在最后一个安全值与失败值之间二分查找。基准只输出汇总耗时、字幕条数和转写文本是否一致，不会打印或保存识别文本。它需要可实际执行推理的 CTranslate2 CUDA 运行库；如果只能检测到 GPU、却无法推理，会报告原因，并且不会安装或修改 Python 依赖。
 
-### 查看通知日志
+### 4.7 查看通知日志
 
 每次处理未去重的通知时，插件默认在 `dsh-kydon-bilibili/log/` 下创建一个 UTF-8 `.log` 文件。文件名包含开始时间的毫秒时间戳、通知类型、评论 ID 和唯一标识。重试会创建新文件。日志记录通知、上下文获取过程、模型输入输出、提供方返回的思考内容（如果有）以及回复发送结果。上下文获取失败时也会创建文件。插件不会把登录凭证写入这些文件。发送前写入日志失败时，该条回复会被跳过。
 
@@ -137,7 +174,7 @@ python -m unittest discover -s test -v
 -----
 
 <a id="understand-the-implementation"></a>
-## 了解实现
+## 5. 了解实现
 
 <details>
 <summary>实现细节 — 点击展开</summary>
@@ -170,7 +207,7 @@ ASR 设置就绪后，视频评论轮询器会与通知轮询同时启动。它�
 -----
 
 <a id="further-exploration"></a>
-## 进一步阅读
+## 6. 进一步阅读
 
 阅读源文件可了解完整的请求和生命周期细节。
 
@@ -183,25 +220,25 @@ ASR 设置就绪后，视频评论轮询器会与通知轮询同时启动。它�
 -----
 
 <a id="model-experience"></a>
-## 模型体验
+## 7. 模型体验
 
-### 请求上下文和条件
+### 7.1 请求上下文和条件
 
-#### 模型看到的内容
+#### 7.1.1 模型看到的内容
 
 每条上下文可用且尚未处理的通知都会创建一个独立的 Agent Session。模型会看到专栏评论的文章正文、由视频音频转写得到的带时间轴文本，以及相关的带时间戳楼中楼对话或当前 @ 评论。Session 系统提示要求模型用简体中文生成不超过 1000 个字符的简洁回复，重写目标为 900 个字符。初稿超过 1000 个 UTF-16 代码单元时，Agent 会按 `replyLengthRewriteAttempts` 配置额外重写。插件会在报告回复准备发送前和调用 `/x/v2/reply/add` 前检查长度；超长结果不会发送。通知上下文和模型输出会记录为消息。该 Agent 的工具调用会被拒绝。
 
 视频总结评论使用独立的 Agent Session。模型会看到视频标题、简介和不超过 `videoCommentMaxTranscriptCharacters` 个字符的带时间戳字幕；必要时会按字幕顺序从全片均匀抽取字幕。系统提示要求输出三个部分，并让时间轴的每个事件单独占一行；工具调用会被拒绝。超长初稿会按同一重写次数设置重新生成，最终评论仍须通过 1000 字符检查。
 
-#### Token 影响
+#### 7.1.2 Token 影响
 
 文章正文或视频转写文本以及相关评论会进入每次模型请求。原文过长时可能超出当前模型的上下文限制，生成失败后插件会跳过该通知。
 
-#### KV Cache 影响
+#### 7.1.3 KV Cache 影响
 
 每条通知或视频都会使用新的 Session，因此后续回复和总结评论不会带入之前来源的内容。稳定策略前缀能否由 Provider 复用由适配器决定。
 
-## 已知限制和后续工作
+## 8. 已知限制和后续工作
 
 通知轮询器处理评论区的 @ 和回复通知。独立的视频评论器会直接发布公开评论，不会逐条征求确认。
 
@@ -223,6 +260,19 @@ ASR 设置就绪后，视频评论轮询器会与通知轮询同时启动。它�
 - 接口日志会持续增长直到插件停止；重启后创建新文件。重放请求时，需要自行补充被遮盖的参数。
 
 <a id="dev-note"></a>
-### 开发备注
+### 8.1 开发备注
 
 无。
+
+<a id="acknowledgements"></a>
+## 9. 致谢
+
+本插件开发参考了以下 B 站相关项目和接口资料：
+
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：本插件运行和集成所依赖的 DSH 插件框架。
+- [dsh-plugin-starter](https://github.com/lansi-ai/dsh-plugin-starter)：DSH 插件开发模板，以及 Host / Client 双端开发参考。
+- [dsh-bili-scroll](https://github.com/c1overzz/dsh-bili-scroll)：同属 DSH 生态的 B 站插件，是本项目功能和插件集成的参考之一。
+- [dsh-bilibili-reply](https://github.com/bronyacccxz/dsh-bilibili-reply)：面向 B 站 @ 通知的 DSH / AI Agent 回复项目，支持发布带时间戳的评论。
+- [bilibili-api-collect](https://github.com/bilibili-plugins/bilibili-api-collect)：二维码登录、WBI 列表及请求响应结构的接口文档资料。
+- [bilibili-video-transcriber](https://github.com/adolescen-he/bilibili-video-transcriber)：字幕错配问题的社区复现资料。
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) 和 [yt-dlp](https://github.com/yt-dlp/yt-dlp)：本地语音转写与公开视频音频下载所用的上游项目。

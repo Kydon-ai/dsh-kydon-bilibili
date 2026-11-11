@@ -1,7 +1,8 @@
 {
   "name": "@kydon/dsh-kydon-bilibili",
-  "description": "适用于DSH的 Bilibili二维码登录及自动通知回复插件",
+  "description": "适用于 DSH 的 Bilibili 二维码登录、通知自动回复和本地转写视频总结插件",
   "version": "0.0.1",
+  "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
@@ -35,6 +36,7 @@
     "watch": "tsdown --watch"
   },
   "files": [
+    "assets/**/*",
     "asr-worker.py",
     "pyproject.toml",
     "uv.lock",
