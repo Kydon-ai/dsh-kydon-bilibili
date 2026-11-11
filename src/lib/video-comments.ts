@@ -85,7 +85,7 @@ export async function runVideoCommentCycle(options: VideoCommentOptions): Promis
   let commentsPosted = 0
   let videosSkipped = 0
 
-  while (commentsPosted < options.maxVideosPerRun) {
+  while (commentsPosted + videosSkipped < options.maxVideosPerRun) {
     signal.throwIfAborted()
     const selection = selectCandidate(groups, state.sourceCursor, handled, selectedThisRun, options.maxVideoDurationSeconds)
     if (selection === undefined) break
