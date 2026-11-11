@@ -24,7 +24,7 @@ export interface ConversationLog {
  * @returns an appender for the new file.
  * @throws when the directory or file cannot be created.
  */
-export function createConversationLog(directory: string, kind: 'at' | 'reply', sourceId: string): ConversationLog {
+export function createConversationLog(directory: string, kind: 'at' | 'reply' | 'video', sourceId: string): ConversationLog {
   return createLog(directory, `${kind}-${sourceId}`)
 }
 

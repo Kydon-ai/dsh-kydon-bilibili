@@ -10,6 +10,7 @@
     "src/lib/conversation-log.ts",
     "src/lib/bilibili-api.ts",
     "src/lib/video-discovery.ts",
+    "src/lib/video-comments.ts",
     "src/lib/http-log.ts",
     "src/lib/login.ts",
     "src/lib/notifications.ts",
