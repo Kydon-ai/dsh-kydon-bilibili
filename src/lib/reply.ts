@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
@@ -48,7 +49,7 @@ const VIDEO_SUMMARY_SYSTEM_PROMPT = [
  * @param timeoutMs - maximum duration of model generation.
  * @param log - per-notification log for model input and available output.
  * @param maxLengthRewrites - maximum additional model rewrites for oversized drafts.
- * @param kind - comment policy to apply; video summaries load `cc-summary` through the skill tool.
+ * @param kind - comment policy to apply; video summaries join the default preset to load `cc-summary`.
  * @returns the assistant's final text reply.
  * @throws when generation fails, output extraction fails, or rewrites cannot meet the reply limit.
  */
@@ -64,6 +65,7 @@ export async function generateReply(
   signal.throwIfAborted()
   const systemPrompt = kind === 'reply' ? SYSTEM_PROMPT : VIDEO_SUMMARY_SYSTEM_PROMPT
   const selection = ctx.agentDefaultModel.currentSelection()
+  const agentPresetId = kind === 'video-summary' ? ctx.agentPresets.defaultId : undefined
   const sessionId = brandString<SessionId>(`bilibili-${kind}-${randomUUID()}`)
   log.write('模型会话', JSON.stringify({ sessionId, ...selection }, null, 2))
   log.write('模型输入：公开评论规则', systemPrompt)
@@ -71,9 +73,16 @@ export async function generateReply(
   const generationSignal = AbortSignal.any([signal, timeoutSignal])
   const handle = await ctx.agents.create({
     sessionId,
+    ...agentPresetId === undefined ? {} : { meta: { agentPreset: agentPresetId } },
     signal: generationSignal,
     agentOptions: selection,
-    setup: (agentCtx) => {
+    setup: async (agentCtx, agent) => {
+      if (agentPresetId !== undefined) {
+        await ctx.agentPresets.mount(agentCtx, agentPresetId)
+        if (agentCtx.tools.get('skill', agent) === undefined) {
+          throw new Error(`Agent preset "${agentPresetId}" does not provide the DSH skill tool.`)
+        }
+      }
       agentCtx.systemPrompt.section({
         name: `${PLUGIN_NAME}:${kind}-policy`,
         order: 0,

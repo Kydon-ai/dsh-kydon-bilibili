@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write dsh-kydon-bilibili/README.md
-README.md: 6e87454eaa5fb1dceab895647fdbf36e99a37718
-README.zh.md: 681f894855f62480698a81b3090b1277450c4f1f
+README.md: 4465bd4deabe97070f5e9bb8f4170d53bf1d3e6a
+README.zh.md: dcccd0bc19f51c7197549ef2bb6fe6c74bb29a6e

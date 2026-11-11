@@ -19,8 +19,8 @@ import { logIncoming } from './lib/http-log.ts'
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'dsh-kydon-bilibili'
 
-/** Host services for authenticated routes and managed ASR child processes. */
-export const inject = ['connection', 'agents', 'agentDefaultModel', 'systemPrompt', 'tools', 'subprocess']
+/** Host services for Bilibili routes, model Agents, and local ASR processes. */
+export const inject = ['connection', 'agents', 'agentDefaultModel', 'agentPresets', 'systemPrompt', 'tools', 'subprocess']
 
 const PLUGIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_LOG_DIR = resolve(PLUGIN_DIR, 'log')
