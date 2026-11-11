@@ -1,0 +1,144 @@
+{
+  "gpu": {
+    "name": "NVIDIA GeForce RTX 4060",
+    "totalMiB": 8188,
+    "freeMiBBeforeRun": 6266
+  },
+  "audioDurationSeconds": 1096.8,
+  "vadClipCount": 40,
+  "vadPreparationSeconds": 2.96,
+  "repeatsPerCase": 2,
+  "directSingleModel": {
+    "samples": [
+      50.49,
+      50.25
+    ],
+    "medianWallSeconds": 50.37,
+    "medianLoadSeconds": 2.15,
+    "medianInferenceSeconds": 47.79,
+    "cueCount": 564,
+    "sameTextAsDirect": true,
+    "failures": []
+  },
+  "adaptiveBatchSearch": {
+    "candidates": [
+      8,
+      16,
+      32,
+      40
+    ],
+    "largestSafeTestedBatchSize": 40,
+    "searchUpperBound": 40,
+    "searchStoppedAtAudioClipCount": true,
+    "fastestMeasuredBatchSize": 32,
+    "selectedBatchSize": 32,
+    "selectedBatchPreservesDirectText": false,
+    "searchFailure": null,
+    "results": {
+      "8": {
+        "samples": [
+          15.02,
+          14.25
+        ],
+        "medianWallSeconds": 14.64,
+        "medianLoadSeconds": 3.22,
+        "medianInferenceSeconds": 11.02,
+        "cueCount": 39,
+        "sameTextAsDirect": false,
+        "failures": []
+      },
+      "16": {
+        "samples": [
+          12.64,
+          15.49
+        ],
+        "medianWallSeconds": 14.07,
+        "medianLoadSeconds": 3.35,
+        "medianInferenceSeconds": 10.31,
+        "cueCount": 39,
+        "sameTextAsDirect": false,
+        "failures": []
+      },
+      "32": {
+        "samples": [
+          12.56,
+          13.08
+        ],
+        "medianWallSeconds": 12.82,
+        "medianLoadSeconds": 1.91,
+        "medianInferenceSeconds": 10.5,
+        "cueCount": 39,
+        "sameTextAsDirect": false,
+        "failures": []
+      },
+      "40": {
+        "samples": [
+          15.7,
+          12.8
+        ],
+        "medianWallSeconds": 14.25,
+        "medianLoadSeconds": 3.59,
+        "medianInferenceSeconds": 10.24,
+        "cueCount": 39,
+        "sameTextAsDirect": false,
+        "failures": []
+      }
+    }
+  },
+  "parallelVADClipWorkers": {
+    "perWorkerBatchSize": 32,
+    "results": {
+      "2": {
+        "samples": [
+          17.77
+        ],
+        "medianWallSeconds": 17.77,
+        "medianLoadSeconds": 2.36,
+        "medianInferenceSeconds": 12.0,
+        "cueCount": 40,
+        "sameTextAsDirect": false,
+        "failures": [
+          {
+            "errorTypes": [
+              "Empty"
+            ],
+            "errorMessage": null,
+            "cudaOom": false
+          }
+        ],
+        "workerWallSamples": [
+          14.81
+        ],
+        "medianWorkerWallSeconds": 14.81,
+        "vadPreparationSecondsAddedToWall": 2.96
+      },
+      "3": {
+        "samples": [
+          347.81
+        ],
+        "medianWallSeconds": 347.81,
+        "medianLoadSeconds": 2.34,
+        "medianInferenceSeconds": 342.06,
+        "cueCount": 40,
+        "sameTextAsDirect": false,
+        "failures": [
+          {
+            "errorTypes": [
+              "Empty"
+            ],
+            "errorMessage": null,
+            "cudaOom": false
+          }
+        ],
+        "workerWallSamples": [
+          344.85
+        ],
+        "medianWorkerWallSeconds": 344.85,
+        "vadPreparationSecondsAddedToWall": 2.96
+      }
+    },
+    "timestamps": "faster-whisper clip offsets preserve positions in the original audio; merged cues are sorted by start time."
+  }
+}
+
+// benchmark_asr_gpu.py脚本运行的结果

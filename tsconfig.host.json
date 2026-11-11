@@ -1,0 +1,32 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "files": [
+    "src/index.ts",
+    "src/lib/conversation-log.ts",
+    "src/lib/http-log.ts",
+    "src/lib/login.ts",
+    "src/lib/notifications.ts",
+    "src/lib/asr.ts",
+    "src/lib/asr-setup.ts",
+    "src/lib/reply.ts"
+  ],
+  "references": [
+    { "path": "../vendor/cordis" },
+    { "path": "../vendor/schemastery" },
+    { "path": "../packages/client/connection/tsconfig.host.json" },
+    { "path": "../packages/util/home-paths" },
+    { "path": "../packages/util/brand" },
+    { "path": "../packages/subprocess/subprocess" },
+    { "path": "../packages/core/agent" },
+    { "path": "../packages/core/agent-default-model" },
+    { "path": "../packages/core/session" },
+    { "path": "../packages/core/system-prompt" },
+    { "path": "../packages/core/tools" },
+    { "path": "../packages/llm/llm" }
+  ]
+}

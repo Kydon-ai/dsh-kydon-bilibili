@@ -1,0 +1,17 @@
+.cache/
+.venv/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+__pycache__/
+*.py[cod]
+*.log
+log/
+node_modules/
+lib/
+.pytest_cache/
+.ruff_cache/
