@@ -7,6 +7,17 @@ import { assertReplyLength } from './reply-length.ts'
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
+/** Bilibili accepted the HTTP request but rejected its application-level operation. */
+export class BilibiliApiError extends Error {
+  constructor(
+    readonly code: unknown,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'BilibiliApiError'
+  }
+}
+
 /** Send one comment to a Bilibili video or comment thread.
  * @param oid - video aid or article id accepted by the reply endpoint.
  * @param type - Bilibili reply subject type.
@@ -55,7 +66,13 @@ export async function postBilibiliComment(
     },
   )
   const response = record(payload)
-  if (response?.code !== 0) throw new Error(`Bilibili reply response returned code ${String(response?.code)}.`)
+  if (response?.code !== 0) {
+    const code = response?.code
+    const detail = typeof response?.message === 'string' && response.message !== '0'
+      ? `: ${response.message}`
+      : ''
+    throw new BilibiliApiError(code, `Bilibili reply response returned code ${String(code)}${detail}.`)
+  }
 }
 
 /** Make one authenticated request and parse Bilibili's JSON number ids exactly.

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { transcribeBilibiliVideo, type AsrOptions } from './asr.ts'
 import { createConversationLog, type ConversationLog } from './conversation-log.ts'
-import { postBilibiliComment, requestBilibiliJson } from './bilibili-api.ts'
+import { BilibiliApiError, postBilibiliComment, requestBilibiliJson } from './bilibili-api.ts'
 import { readCredential, type BilibiliCredential } from './login.ts'
 import { assertReplyLength } from './reply-length.ts'
 
@@ -14,6 +14,7 @@ const API_ORIGIN = 'https://api.bilibili.com'
 const NOTIFICATION_STATE_FILE = 'notification-handled.json'
 
 type NotificationKind = 'at' | 'reply'
+type ReplyFailureDisposition = 'retrying' | 'discarded'
 
 interface FeedPosition {
   readonly id: string
@@ -87,6 +88,7 @@ export interface NotificationPollResult {
  * @param onReply - called with the generated text and millisecond timestamp before posting.
  * @param onContextFailure - called when required context retrieval fails and posting is skipped.
  * @param onGenerationFailure - called when reply generation fails and posting is skipped.
+ * @param onReplyFailure - called when Bilibili rejects a reply; reports whether it will be retried.
  * @param asrOptions - local Whisper worker settings used to transcribe video notifications.
  * @param subprocess - Host-managed child-process service used by the ASR worker.
  * @returns the poll state and counts of successful replies.
@@ -104,6 +106,7 @@ export async function pollNotifications(
   onReply: (kind: NotificationKind, timestampMs: number, content: string) => void,
   onContextFailure: (kind: NotificationKind, error: unknown) => void,
   onGenerationFailure: (kind: NotificationKind, error: unknown) => void,
+  onReplyFailure: (kind: NotificationKind, error: unknown, disposition: ReplyFailureDisposition) => void,
   asrOptions?: AsrOptions,
   subprocess?: SubprocessRuntime,
 ): Promise<NotificationPollResult> {
@@ -121,7 +124,7 @@ export async function pollNotifications(
   await enqueueFeedNotifications('at', unread.at, credential, stateDir, notificationState, signal, requestTimeoutMs, requestLog)
   const replies = await processPendingNotifications(
     notificationState, credential, stateDir, logDir, requestLog, signal, requestTimeoutMs, articleCache,
-    onContext, generateReply, onReply, onContextFailure, onGenerationFailure, asrOptions, subprocess,
+    onContext, generateReply, onReply, onContextFailure, onGenerationFailure, onReplyFailure, asrOptions, subprocess,
   )
 
   return {
@@ -242,6 +245,7 @@ async function processPendingNotifications(
   onReply: (kind: NotificationKind, timestampMs: number, content: string) => void,
   onContextFailure: (kind: NotificationKind, error: unknown) => void,
   onGenerationFailure: (kind: NotificationKind, error: unknown) => void,
+  onReplyFailure: (kind: NotificationKind, error: unknown, disposition: ReplyFailureDisposition) => void,
   asrOptions: AsrOptions | undefined,
   subprocess: SubprocessRuntime | undefined,
 ): Promise<Record<NotificationKind, number>> {
@@ -296,7 +300,17 @@ async function processPendingNotifications(
       await replyToTarget(target, content, credential, signal, requestTimeoutMs, requestLog, log)
     } catch (error) {
       log.write('发送失败', errorMessage(error))
-      throw error
+      if (signal.aborted) throw error
+      const targetUnavailable = error instanceof BilibiliApiError
+        && (error.code === 12006 || error.code === 12022)
+      if (targetUnavailable) {
+        log.write('Reply target unavailable; notification discarded', errorMessage(error))
+        completeNotification(stateDir, state, target.key)
+        onReplyFailure(kind, error, 'discarded')
+      } else {
+        onReplyFailure(kind, error, 'retrying')
+      }
+      continue
     }
 
     try {

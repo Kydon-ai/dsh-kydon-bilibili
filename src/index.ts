@@ -276,6 +276,12 @@ export function apply(ctx: Context, config: Config = {}): void {
           error instanceof Error ? error.message : String(error),
         ),
         (kind, error) => console.warn(`${LOG_PREFIX} ${kind} reply generation failed; reply skipped.`, error),
+        (kind, error, disposition) => console.warn(
+          `${LOG_PREFIX} ${kind} reply posting failed; ${disposition === 'discarded'
+            ? 'notification discarded because the target comment is unavailable.'
+            : 'notification retained for retry.'}`,
+          error instanceof Error ? error.message : String(error),
+        ),
         resolved.asrOptions,
         ctx.subprocess,
       ).then((result) => {

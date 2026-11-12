@@ -74,8 +74,12 @@ def download_audio(bvid: str, page: int, temp_dir: Path) -> tuple[Path, dict[str
     }
     with YoutubeDL(options) as downloader:
         info = downloader.extract_info(video_url, download=True)
-        if not isinstance(info, dict) or info.get("id") != bvid:
-            raise ValueError("Downloaded video id does not match the requested BV id.")
+        expected_ids = {bvid, f"{bvid}_p{page}"}
+        actual_id = info.get("id") if isinstance(info, dict) else None
+        if actual_id not in expected_ids:
+            raise ValueError(
+                f"Downloaded video id {actual_id!r} does not match requested {bvid} page {page}."
+            )
         audio_path = Path(downloader.prepare_filename(info))
     if not audio_path.is_file():
         raise FileNotFoundError("yt-dlp did not produce an audio file.")
@@ -230,7 +234,7 @@ def main() -> int:
     except ModuleNotFoundError as error:
         return emit_failure(f"Missing ASR dependency: {error.name}.")
     except Exception as error:
-        return emit_failure(f"ASR worker failed: {type(error).__name__}.")
+        return emit_failure(f"ASR worker failed: {type(error).__name__}: {error}")
 
 
 def load_model_on_cpu(model_ref: str) -> tuple[Any, str]:
