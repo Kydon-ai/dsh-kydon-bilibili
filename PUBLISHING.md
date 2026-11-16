@@ -11,7 +11,7 @@ npm whoami
 npm view @kydon/dsh-kydon-bilibili version
 ```
 
-已发布的版本不能覆盖。当前已发布版本为 `0.0.1`；按 patch 版本递增时，下一版是 `0.0.2`。如果注册表上已有更新版本，先根据实际版本选择新的版本号。
+已发布的版本不能覆盖。当前已发布版本为 `0.0.2`；按 patch 版本递增时，下一版是 `0.0.3`。如果注册表上已有更新版本，先根据实际版本选择新的版本号。
 
 发布前应先把功能提交到 `main` 并推送。这个插件是 Harness 工作区里的嵌套 Git 仓库；pnpm 识别到的 workspace 根目录在外层 `deepseek-harness`。如果外层仓库有未提交改动，`pnpm version patch` 的默认 Git 检查可能报工作区不干净，即使插件仓库自己的 `git status` 是干净的。
 
@@ -35,12 +35,12 @@ git status --short
    pnpm version patch --no-git-checks --no-git-tag-version
    ```
 
-2. 查看 `package.json` 中的新版本号，在插件仓库提交版本变更并创建匹配的 tag。以下以 `0.0.2` 为例：
+2. 查看 `package.json` 中的新版本号，在插件仓库提交版本变更并创建匹配的 tag。以下以 `0.0.3` 为例：
 
    ```powershell
    git add package.json
-   git commit -m "chore: release v0.0.2"
-   git tag -a v0.0.2 -m "v0.0.2"
+   git commit -m "chore: release v0.0.3"
+   git tag -a v0.0.3 -m "v0.0.3"
    ```
 
 3. 推送功能提交、版本提交和 tag：
@@ -71,7 +71,7 @@ git status --short
    pnpm publish --access public --no-git-checks
    ```
 
-   pnpm 会在打包时把 `workspace:^` 依赖转换为注册表可用的版本范围。若账号要求一次性验证码，按 pnpm 提示完成验证。
+   本项目的 `dependencies`、`peerDependencies` 和 `devDependencies` 已使用 npm 可解析的版本范围。发布前执行 `pnpm pack`，检查生成包内的 `package.json` 不含 `workspace:`；若账号要求一次性验证码，按 pnpm 提示完成验证。
 
 7. 发布后确认 npm 上的版本：
 
