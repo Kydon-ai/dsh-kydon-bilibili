@@ -37,6 +37,8 @@ interface NotificationTarget {
   readonly title: string
   readonly uri: string
   readonly author: string
+  /** Sender UID when Bilibili included it; absent legacy queue entries are discarded under owner filtering. */
+  readonly senderMid?: string
 }
 
 interface PendingNotification {
@@ -91,6 +93,7 @@ export interface NotificationPollResult {
  * @param onReplyFailure - called when Bilibili rejects a reply; reports whether it will be retried.
  * @param asrOptions - local Whisper worker settings used to transcribe video notifications.
  * @param subprocess - Host-managed child-process service used by the ASR worker.
+ * @param ownerUid - when provided, only notification senders with this UID are processed.
  * @returns the poll state and counts of successful replies.
  * @throws when Bilibili rejects a request or returns a malformed notification.
  */
@@ -109,6 +112,7 @@ export async function pollNotifications(
   onReplyFailure: (kind: NotificationKind, error: unknown, disposition: ReplyFailureDisposition) => void,
   asrOptions?: AsrOptions,
   subprocess?: SubprocessRuntime,
+  ownerUid?: string,
 ): Promise<NotificationPollResult> {
   signal.throwIfAborted()
   const credential = readCredential(stateDir)
@@ -120,11 +124,11 @@ export async function pollNotifications(
   onUnreadCounts(unread.data)
   const notificationState = readNotificationState(stateDir)
   const articleCache = new Map<string, Promise<ArticleContext>>()
-  await enqueueFeedNotifications('reply', unread.reply, credential, stateDir, notificationState, signal, requestTimeoutMs, requestLog)
-  await enqueueFeedNotifications('at', unread.at, credential, stateDir, notificationState, signal, requestTimeoutMs, requestLog)
+  await enqueueFeedNotifications('reply', unread.reply, credential, stateDir, notificationState, signal, requestTimeoutMs, requestLog, ownerUid)
+  await enqueueFeedNotifications('at', unread.at, credential, stateDir, notificationState, signal, requestTimeoutMs, requestLog, ownerUid)
   const replies = await processPendingNotifications(
     notificationState, credential, stateDir, logDir, requestLog, signal, requestTimeoutMs, articleCache,
-    onContext, generateReply, onReply, onContextFailure, onGenerationFailure, onReplyFailure, asrOptions, subprocess,
+    onContext, generateReply, onReply, onContextFailure, onGenerationFailure, onReplyFailure, asrOptions, subprocess, ownerUid,
   )
 
   return {
@@ -167,6 +171,7 @@ async function enqueueFeedNotifications(
   signal: AbortSignal,
   requestTimeoutMs: number,
   requestLog: ConversationLog,
+  ownerUid?: string,
 ): Promise<void> {
   let remaining = unreadCount
   let cursor: FeedCursor | undefined
@@ -197,15 +202,19 @@ async function enqueueFeedNotifications(
       const isNewSinceLastPoll = previousHead !== undefined && compareFeedPositions(position, previousHead) > 0
       if (previousHead === undefined) {
         if (isUnreadByCount) {
-          const target = notificationTarget(raw, credential.dedeuserid, kind)
-          enqueueNotification(stateDir, state, { kind, target })
+          if (ownerUid === undefined || notificationSenderMid(raw) === ownerUid) {
+            const target = notificationTarget(raw, credential.dedeuserid, kind)
+            enqueueNotification(stateDir, state, { kind, target })
+          }
           remaining -= 1
         }
         if (remaining === 0) break
       } else {
         if (isNewSinceLastPoll || isUnreadByCount) {
-          const target = notificationTarget(raw, credential.dedeuserid, kind)
-          enqueueNotification(stateDir, state, { kind, target })
+          if (ownerUid === undefined || notificationSenderMid(raw) === ownerUid) {
+            const target = notificationTarget(raw, credential.dedeuserid, kind)
+            enqueueNotification(stateDir, state, { kind, target })
+          }
         }
         if (isUnreadByCount) remaining -= 1
         if (compareFeedPositions(position, previousHead) <= 0 && remaining === 0) {
@@ -248,6 +257,7 @@ async function processPendingNotifications(
   onReplyFailure: (kind: NotificationKind, error: unknown, disposition: ReplyFailureDisposition) => void,
   asrOptions: AsrOptions | undefined,
   subprocess: SubprocessRuntime | undefined,
+  ownerUid?: string,
 ): Promise<Record<NotificationKind, number>> {
   const replies: Record<NotificationKind, number> = { at: 0, reply: 0 }
   const queued = [
@@ -258,6 +268,10 @@ async function processPendingNotifications(
   for (const notification of queued) {
     signal.throwIfAborted()
     const { kind, target } = notification
+    if (ownerUid !== undefined && target.senderMid !== ownerUid) {
+      removePendingNotification(stateDir, state, target.key)
+      continue
+    }
     if (state.handled.has(target.key)) {
       removePendingNotification(stateDir, state, target.key)
       continue
@@ -361,6 +375,7 @@ function notificationTarget(value: unknown, accountMid: string, kind: Notificati
   const notification = requireRecord(value, 'notification item')
   const item = requireRecord(notification.item, 'notification details')
   const user = asRecord(notification.user)
+  const senderMid = notificationSenderMid(notification)
   const oid = readIdentifier(item.subject_id)
   const sourceId = readIdentifier(item.source_id)
   const rootId = readIdentifier(item.root_id)
@@ -393,7 +408,15 @@ function notificationTarget(value: unknown, accountMid: string, kind: Notificati
     title: stringField(item.title),
     uri: stringField(item.uri),
     author: stringField(user?.nickname),
+    ...(senderMid === undefined ? {} : { senderMid }),
   }
+}
+
+/** Read the event sender's Bilibili UID from a notification item. */
+function notificationSenderMid(value: unknown): string | undefined {
+  const notification = asRecord(value)
+  const user = asRecord(notification?.user)
+  return readIdentifier(user?.mid) ?? readIdentifier(user?.uid)
 }
 
 /** Build subject material and timestamped comment context for the model. */
@@ -916,6 +939,8 @@ function isPendingNotification(value: unknown): value is PendingNotification {
   const stringFields = ['key', 'oid', 'root', 'parent', 'sourceId', 'sourceContent', 'title', 'uri', 'author'] as const
   if (!stringFields.every(field => typeof target[field] === 'string')) return false
   if (String(target.key).length === 0) return false
+  const senderMid = target.senderMid
+  if (senderMid !== undefined && (typeof senderMid !== 'string' || !/^[1-9]\d*$/u.test(senderMid))) return false
   if (typeof target.businessId !== 'number' || !Number.isSafeInteger(target.businessId) || target.businessId <= 0) return false
   const timestampMs = target.timestampMs
   return timestampMs === undefined || (

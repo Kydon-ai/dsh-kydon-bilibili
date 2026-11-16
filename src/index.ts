@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type { AsrOptions } from './lib/asr.ts'
 import { AsrSetupManager, type AsrSetupSnapshot } from './lib/asr-setup.ts'
@@ -15,6 +16,7 @@ import { generateReply } from './lib/reply.ts'
 import { runVideoCommentCycle } from './lib/video-comments.ts'
 import { createRequestLog, type ConversationLog } from './lib/conversation-log.ts'
 import { logIncoming } from './lib/http-log.ts'
+import { BILIBILI_SETTINGS_NAMESPACE } from './settings.ts'
 
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'dsh-kydon-bilibili'
@@ -35,6 +37,8 @@ const ASR_WORKER_PATH = resolve(PLUGIN_DIR, 'asr-worker.py')
 
 /** QR login and Bilibili notification polling behavior configured by the deployment. */
 export interface Config {
+  /** Bilibili UID whose messages the plugin may answer. Empty disables notification polling. */
+  ownerUid?: string
   /** Delay between QR status requests, in milliseconds. Defaults to 2000. */
   qrPollIntervalMs?: number
   /** Maximum QR login wait, in milliseconds. Defaults to 180000. */
@@ -47,7 +51,7 @@ export interface Config {
   replyGenerationTimeoutMs?: number
   /** Additional model rewrites after an oversized reply, from 0 to 5. Defaults to 2. */
   replyLengthRewriteAttempts?: number
-  /** Enable automatic video summary comments. Defaults to true. */
+  /** Enable automatic video summary comments. Defaults to false. */
   videoCommentEnabled?: boolean
   /** Delay between video discovery and comment cycles, in milliseconds. Defaults to 600000. */
   videoCommentIntervalMs?: number
@@ -77,13 +81,14 @@ export interface Config {
 
 /** Cordis-validated login and notification polling settings. */
 export const Config: z<Config> = z.object({
+  ownerUid: z.string().default(''),
   qrPollIntervalMs: z.number().step(1).min(500).max(10_000).default(2_000),
   qrTimeoutMs: z.number().step(1).min(10_000).max(300_000).default(180_000),
   notificationPollIntervalMs: z.number().step(1).min(10_000).max(3_600_000).default(60_000),
   notificationRequestTimeoutMs: z.number().step(1).min(1_000).max(120_000).default(20_000),
   replyGenerationTimeoutMs: z.number().step(1).min(1_000).max(300_000).default(120_000),
   replyLengthRewriteAttempts: z.number().step(1).min(0).max(5).default(2),
-  videoCommentEnabled: z.boolean().default(true),
+  videoCommentEnabled: z.boolean().default(false),
   videoCommentIntervalMs: z.number().step(1).min(60_000).max(3_600_000).default(600_000),
   videoCommentMaxPerRun: z.number().step(1).min(1).max(3).default(1),
   videoCommentMaxDurationSeconds: z.number().step(1).min(60).max(14_400).default(1_800),
@@ -105,6 +110,7 @@ export const Config: z<Config> = z.object({
 })
 
 interface ResolvedConfig {
+  readonly ownerUid: string
   readonly qrPollIntervalMs: number
   readonly qrTimeoutMs: number
   readonly notificationPollIntervalMs: number
@@ -141,11 +147,15 @@ const LOG_PREFIX = '[dsh-kydon-bilibili]'
  * @param config - Login, notification polling, local transcription, and log-directory settings.
  */
 export function apply(ctx: Context, config: Config = {}): void {
-  const resolved = resolveConfig(config)
+  let resolved = resolveConfig(config)
   const requestLog = createRequestLog(resolved.logDir)
   let disposed = false
+  let setupReady = false
+  let workerSync = Promise.resolve()
   let stopPoller: (() => Promise<void>) | undefined
+  let activeOwnerUid: string | undefined
   let stopVideoCommenter: (() => Promise<void>) | undefined
+  let configSource: () => Config = () => config
   const setup = new AsrSetupManager({
     pluginDir: PLUGIN_DIR,
     lockPath: resolve(PLUGIN_DIR, 'uv.lock'),
@@ -159,19 +169,29 @@ export function apply(ctx: Context, config: Config = {}): void {
     subprocess: ctx.subprocess,
     onReady: () => {
       if (disposed) return
-      if (stopPoller === undefined) stopPoller = startNotificationPoller()
-      if (resolved.videoCommentEnabled && stopVideoCommenter === undefined) {
-        stopVideoCommenter = startVideoCommenter()
-      }
+      setupReady = true
+      void syncWorkers()
     },
     onPause: async () => {
-      const stop = stopPoller
-      stopPoller = undefined
-      const stopVideos = stopVideoCommenter
-      stopVideoCommenter = undefined
-      await Promise.all([stop?.(), stopVideos?.()])
+      setupReady = false
+      await syncWorkers()
     },
     warn: message => console.warn(`${LOG_PREFIX} ${message}`),
+  })
+  ctx.inject(['settings'], settingsCtx => {
+    settingsCtx.settings.installSection(ctx, BILIBILI_SETTINGS_NAMESPACE, Config, config, {
+      validate: value => { void resolveConfig(value) },
+      setSource: source => { configSource = source },
+      onChange: () => {
+        try {
+          resolved = resolveConfig(configSource())
+        } catch (error) {
+          console.warn(`${LOG_PREFIX} settings update was rejected.`, error)
+          return
+        }
+        void syncWorkers()
+      },
+    })
   })
   // 获取二维码
   ctx.effect(() => ctx.connection.fetch.register({
@@ -236,13 +256,44 @@ export function apply(ctx: Context, config: Config = {}): void {
     })
     return async () => {
       disposed = true
+      setupReady = false
       await setup.dispose()
-      await stopPoller?.()
-      await stopVideoCommenter?.()
+      await syncWorkers()
     }
   }, 'dsh-kydon-bilibili: ASR setup and notification lifecycle')
 
-  function startNotificationPoller(): () => Promise<void> {
+  function syncWorkers(): Promise<void> {
+    const next = workerSync.then(async () => {
+      const canRun = !disposed && setupReady
+      const ownerUid = canRun ? resolved.ownerUid : ''
+      if (stopPoller !== undefined && activeOwnerUid !== ownerUid) {
+        const stop = stopPoller
+        stopPoller = undefined
+        activeOwnerUid = undefined
+        await stop()
+      }
+      if (stopPoller === undefined && ownerUid.length > 0) {
+        activeOwnerUid = ownerUid
+        stopPoller = startNotificationPoller(ownerUid)
+      }
+
+      const shouldRunVideoComments = canRun && resolved.videoCommentEnabled
+      if (stopVideoCommenter !== undefined && !shouldRunVideoComments) {
+        const stop = stopVideoCommenter
+        stopVideoCommenter = undefined
+        await stop()
+      }
+      if (stopVideoCommenter === undefined && shouldRunVideoComments) {
+        stopVideoCommenter = startVideoCommenter()
+      }
+    })
+    workerSync = next.catch(error => {
+      console.warn(`${LOG_PREFIX} worker configuration update failed.`, error)
+    })
+    return workerSync
+  }
+
+  function startNotificationPoller(ownerUid: string): () => Promise<void> {
     const controller = new AbortController()
     let stopping = false
     let activePoll: Promise<void> | undefined
@@ -284,6 +335,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         ),
         resolved.asrOptions,
         ctx.subprocess,
+        ownerUid,
       ).then((result) => {
         if (result.state === 'no-credentials') {
           if (!reportedMissingCredential) {
@@ -387,13 +439,14 @@ export function apply(ctx: Context, config: Config = {}): void {
 
 /** Resolve and validate QR and notification polling settings at plugin load. */
 function resolveConfig(config: Config): ResolvedConfig {
+  const ownerUid = (config.ownerUid ?? '').trim()
   const qrPollIntervalMs = config.qrPollIntervalMs ?? 2_000
   const qrTimeoutMs = config.qrTimeoutMs ?? 180_000
   const notificationPollIntervalMs = config.notificationPollIntervalMs ?? 60_000
   const notificationRequestTimeoutMs = config.notificationRequestTimeoutMs ?? 20_000
   const replyGenerationTimeoutMs = config.replyGenerationTimeoutMs ?? 120_000
   const replyLengthRewriteAttempts = config.replyLengthRewriteAttempts ?? 2
-  const videoCommentEnabled = config.videoCommentEnabled ?? true
+  const videoCommentEnabled = config.videoCommentEnabled ?? false
   const videoCommentIntervalMs = config.videoCommentIntervalMs ?? 600_000
   const videoCommentMaxPerRun = config.videoCommentMaxPerRun ?? 1
   const videoCommentMaxDurationSeconds = config.videoCommentMaxDurationSeconds ?? 1_800
@@ -414,6 +467,9 @@ function resolveConfig(config: Config): ResolvedConfig {
   const logDir = config.logDir ?? DEFAULT_LOG_DIR
   if (logDir.trim().length === 0 || asrPythonExecutable.trim().length === 0 || asrCacheDir.trim().length === 0 || uvExecutable.trim().length === 0) {
     throw new TypeError('dsh-kydon-bilibili: logDir, asrPythonExecutable, asrCacheDir, and uvExecutable must not be empty')
+  }
+  if (ownerUid.length > 0 && !/^[1-9]\d*$/u.test(ownerUid)) {
+    throw new TypeError('dsh-kydon-bilibili: ownerUid must be empty or a positive decimal Bilibili UID')
   }
   if (!Number.isSafeInteger(qrPollIntervalMs) || qrPollIntervalMs < 500 || qrPollIntervalMs > 10_000) {
     throw new TypeError('dsh-kydon-bilibili: qrPollIntervalMs must be an integer from 500 to 10000')
@@ -463,6 +519,7 @@ function resolveConfig(config: Config): ResolvedConfig {
     throw new TypeError('dsh-kydon-bilibili: asrInstallTimeoutMs must be an integer from 60000 to 7200000')
   }
   return {
+    ownerUid,
     qrPollIntervalMs,
     qrTimeoutMs,
     notificationPollIntervalMs,

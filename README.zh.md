@@ -1,11 +1,11 @@
 ---
-description: "配置 B 站二维码登录、未读评论通知自动回复和定时视频总结评论；模型会先读取本地转写字幕，再为已登录账号生成带时间轴的评论。"
+description: "配置 B 站二维码登录、仅回复主人 UID 的未读评论通知，以及默认关闭的视频总结；模型会先读取本地转写字幕，再为已登录账号生成带时间轴的评论。"
 kind: "package-reference"
 ---
 
 <h1 align="center">dsh-kydon-bilibili</h1>
 
-<p align="center"><em>面向 DSH 的 B 站二维码登录、通知自动回复和本地视频总结插件。</em></p>
+<p align="center"><em>面向 DSH 的 B 站二维码登录、主人消息回复和可选本地视频总结插件。</em></p>
 
 <p align="center">
   <img src="assets/bilibili-plugin-icon.png" alt="B 站 DSH 插件图标" width="144" />
@@ -30,9 +30,9 @@ kind: "package-reference"
 ## 2. 功能概览
 
 - **二维码登录：** 在 DSH 设置卡片中扫码登录 B 站账号。
-- **通知自动回复：** 轮询未读 @ 和评论回复；失败的待处理通知会保留以便重试，并对已处理通知去重。生成的回复在发送前会检查 B 站 1000 字符限制。
+- **仅回复主人消息：** 在设置卡片填写主人 UID 后才开始轮询未读 @ 和评论回复；只会将该 UID 发来的通知加入队列并回复。留空时完全不轮询消息；队列中没有匹配发送者 UID 的旧通知会在处理前丢弃。
 - **本地视频转写：** 下载可访问的公开视频音频，使用 `faster-whisper` `small` 模型转写。CUDA 可用时优先 GPU 批量推理，失败时回退到 CPU。字幕按 BV 号和分 P 缓存以便复用。
-- **定时视频总结：** 轮换热门、推荐和搜索视频，调用随包提供的 `cc-summary` skill 生成带时间轴的总结，并发布为顶层评论。视频评论默认开启，可通过 `videoCommentEnabled: false` 关闭。
+- **定时视频总结：** 通过独立开关轮换热门、推荐和搜索视频，调用随包提供的 `cc-summary` skill 生成带时间轴的总结，并发布为顶层评论。自动轮询默认关闭。
 - **用户确认本地环境：** 在设置卡片中同意后才安装 `uv` 转写环境；Whisper 模型在首次转写时另行下载。
 
 <a id="install"></a>
@@ -66,7 +66,7 @@ dsh plugin --profile web add @kydon/dsh-kydon-bilibili
 
 ### 4.1 适用场景
 
-当已登录的 B 站账号需要自动回复未读 @ 和评论回复，并按默认设置每十分钟发布一条模型生成的视频总结评论时使用。设置 `videoCommentEnabled: false` 可停止视频评论，同时保留通知回复。
+当已登录的 B 站账号需要只回复指定主人 UID 发来的消息时使用。主人 UID 留空时不会轮询消息；自动视频总结是独立选项，默认关闭。
 
 ### 4.2 最小挂载配置
 
@@ -76,25 +76,27 @@ profile 补丁使用以下默认值挂载插件；可以在插件配置中修改
 - id: dsh-kydon-bilibili
   name: '@kydon/dsh-kydon-bilibili'
   config:
+    ownerUid: ''
     qrPollIntervalMs: 2000
     qrTimeoutMs: 180000
     notificationPollIntervalMs: 60000
     notificationRequestTimeoutMs: 20000
     replyGenerationTimeoutMs: 120000
-    videoCommentEnabled: true
+    videoCommentEnabled: false
     videoCommentIntervalMs: 600000
     videoCommentMaxPerRun: 1
 ```
 
 | 字段 | 默认值 | 含义 |
 |---|---:|---|
+| `ownerUid` | `''` | 允许自动回复的正整数 Bilibili UID；留空时关闭通知轮询。 |
 | `qrPollIntervalMs` | `2000` | 浏览器查询二维码状态的间隔。 |
 | `qrTimeoutMs` | `180000` | 单次二维码登录的最长等待时间。 |
-| `notificationPollIntervalMs` | `60000` | 检查间隔范围为 `10000` 到 `3600000` 毫秒；依赖就绪后立即执行首次检查。 |
+| `notificationPollIntervalMs` | `60000` | 检查间隔范围为 `10000` 到 `3600000` 毫秒；ASR 就绪且填写 `ownerUid` 后才开始轮询。 |
 | `notificationRequestTimeoutMs` | `20000` | 单个请求超时范围为 `1000` 到 `120000` 毫秒。 |
 | `replyGenerationTimeoutMs` | `120000` | 模型生成回复的最长时间，范围为 `1000` 到 `300000` 毫秒。 |
 | `replyLengthRewriteAttempts` | `2` | 回复超长后的额外模型重写次数，范围为 `0` 到 `5`。 |
-| `videoCommentEnabled` | `true` | ASR 设置就绪后发布视频总结评论；设为 `false` 可仅保留通知回复。 |
+| `videoCommentEnabled` | `false` | 开启 ASR 就绪后的定时视频总结评论；可独立于主人 UID 设置。 |
 | `videoCommentIntervalMs` | `600000` | 视频扫描间隔，范围为 `60000` 到 `3600000` 毫秒；ASR 设置就绪后立即执行首次扫描。 |
 | `videoCommentMaxPerRun` | `1` | 每轮尝试处理的视频数，范围为 `1` 到 `3`。 |
 | `videoCommentMaxDurationSeconds` | `1800` | 跳过已知时长超过该值的视频，范围为 `60` 到 `14400` 秒。 |
@@ -112,11 +114,11 @@ profile 补丁使用以下默认值挂载插件；可以在插件配置中修改
 
 处理每条视频通知时，插件从通知链接读取 BV 号和分 P，并先检查匹配的 SRT 缓存。缓存缺失或字幕无效时，才用 `yt-dlp` 下载对应音频，并用 `faster-whisper` 的 `small` 模型转写。插件不调用 B 站字幕接口；`yt-dlp` 会按下载流程请求解析和获取音频所需的媒体信息，并核对返回的 BV 号是否与通知链接一致。下载音频保存在 `.cache/audio/`；生成的 SRT 文件保存在 `.cache/subtitles/`，文件名包含 BV 号和分 P。后续通知会在下载音频前复用匹配且有效的字幕。Whisper 模型缓存到 `.cache/`。首次运行可能需要下载模型。转写先检测 CUDA，并使用配置的 `asrBatchSize`（默认 `32`）通过 `BatchedInferencePipeline` 尝试 GPU `float16` 批量转写。没有可用 CUDA 设备，或 GPU 模型初始化、批量推理失败时，会回退到 CPU `int8` 直接转写。`asr-worker.py` 使用公开视频地址，不读取插件登录 Cookie；需要登录、不可访问或受限的视频无法通过本地转写处理。
 
-启动插件前请先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)。在设置卡片中点击“安装”以同意在插件根目录运行 `uv sync --locked`。环境安装成功前，Host 会暂停通知轮询和回复；二维码登录仍可用。安装成功后，Host 会在 DSH 用户目录写入标记并立即开始轮询，无需重启。后续启动时，如果标记仍匹配 `uv.lock` 且插件 `.venv` 中的 Python 仍存在，就会跳过安装；锁文件改变或环境缺失时，卡片会显示安装操作。首次处理视频时会单独下载 Whisper 模型。`pyproject.toml` 声明依赖和 uv 项目设置，`uv.lock` 固定解析版本，`.python-version` 选择 Python 3.12。
+启动插件前请先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)。在设置卡片中点击“安装”以同意在插件根目录运行 `uv sync --locked`。环境安装成功且填写有效主人 UID 前，Host 不会启动通知轮询；二维码登录仍可用。安装成功后，Host 会在 DSH 用户目录写入标记并按已保存设置启动工作器，无需重启。后续启动时，如果标记仍匹配 `uv.lock` 且插件 `.venv` 中的 Python 仍存在，就会跳过安装；锁文件改变或环境缺失时，卡片会显示安装操作。首次处理视频时会单独下载 Whisper 模型。
 
 ### 4.4 定时发布视频总结评论
 
-ASR 设置成功后，Host 会立即运行一次视频扫描，之后按 `videoCommentIntervalMs` 毫秒间隔继续扫描。若尚未保存 B 站登录凭据，本轮会等待下一次定时扫描。将 `videoCommentEnabled` 设为 `false` 可关闭该轮询器，同时保留通知回复。
+视频轮询默认关闭。开启设置卡片中的 `videoCommentEnabled` 后，ASR 就绪时会立即扫描一次视频，之后按 `videoCommentIntervalMs` 毫秒间隔继续扫描。若尚未保存 B 站登录凭据，本轮会等待下一次定时扫描。该开关独立于主人消息回复。
 
 每轮会获取全站热门列表、当前账号的推荐列表，并使用下一条配置搜索词查询视频。来源游标会在热门、推荐和搜索之间轮换。默认每轮尝试处理一条视频；已知时长超过 `videoCommentMaxDurationSeconds` 的视频会跳过。模型会看到标题、简介以及缓存或新转写的字幕。字幕超过 `videoCommentMaxTranscriptCharacters` 时，插件会按字幕顺序均匀抽样。
 
@@ -179,9 +181,9 @@ python -m unittest discover -s test -v
 <details>
 <summary>实现细节 — 点击展开</summary>
 
-Host 会在用户批准设置卡片安装并成功执行 `uv sync --locked` 后开始 `/x/msgfeed/unread` 轮询。DSH home 中的锁摘要标记可在锁文件和环境未变化时跳过后续安装。ASR 设置等待期间仍可扫码登录。设置就绪后，Host 先处理回复通知，再处理 @ 通知，并在终端打印未读数。专栏评论（`business_id=12`）带文章正文；视频评论（`business_id=1`）从通知 URL 读取 BV 号和分 P，下载音频并通过本地 `faster-whisper` 生成带时间戳 SRT。插件不调用 B 站字幕 API；`yt-dlp` 负责解析媒体并核对 BV 号。转写优先尝试 CUDA，遇到 GPU 不可用、模型加载或推理失败时回退到 CPU `int8`。音频和 SRT 保留在配置的缓存目录。回复通知包含根评论和此前的楼中楼；@ 通知只包含当前评论。评论时间使用 Unix 毫秒时间戳（楼中楼为 `ctime`，@ 为 `at_time`）。Host 将这些上下文交给独立 DSH Agent Session 和默认模型，禁止工具调用。插件打印上下文和回复时间戳，然后调用 `/x/v2/reply/add`。文章或转写不可用、视频标识不匹配、生成失败或返回空文本时会跳过该通知。日志记录视频、分 P、语言、字幕段数、时长、音频与 SRT 路径、设备及 CPU 回退原因。Cordis effect 管理安装、通知轮询和视频评论调度；卸载时取消并等待活动任务结束。
+Host 会在用户批准安装、成功执行 `uv sync --locked` 且填写有效主人 UID 后启动工作器。未填写 UID 时不会请求 `/x/msgfeed/unread`。Host 只把发送者 UID 与主人 UID 一致的通知加入队列；没有匹配发送者的旧待办会在处理前丢弃。DSH home 中的锁摘要标记可在锁文件和环境未变化时跳过后续安装。ASR 设置等待期间仍可扫码登录。启用通知轮询后，Host 先处理回复通知，再处理 @ 通知，并在终端打印未读数。专栏评论（`business_id=12`）带文章正文；视频评论（`business_id=1`）从通知 URL 读取 BV 号和分 P，下载音频并通过本地 `faster-whisper` 生成带时间戳 SRT。插件不调用 B 站字幕 API；`yt-dlp` 负责解析媒体并核对 BV 号。转写优先尝试 CUDA，遇到 GPU 不可用、模型加载或推理失败时回退到 CPU `int8`。音频和 SRT 保留在配置的缓存目录。回复通知包含根评论和此前的楼中楼；@ 通知只包含当前评论。评论时间使用 Unix 毫秒时间戳（楼中楼为 `ctime`，@ 为 `at_time`）。Host 将这些上下文交给独立 DSH Agent Session 和默认模型，禁止工具调用。插件打印上下文和回复时间戳，然后调用 `/x/v2/reply/add`。文章或转写不可用、视频标识不匹配、生成失败或返回空文本时会跳过该通知。日志记录视频、分 P、语言、字幕段数、时长、音频与 SRT 路径、设备及 CPU 回退原因。Cordis effect 管理安装和两个工作器；卸载时取消并等待活动任务结束。
 
-ASR 设置就绪后，视频评论轮询器会与通知轮询同时启动。它会立即获取热门、个性化推荐和搜索结果，再按持久化的轮换顺序选择候选视频。流程复用现有的 BV 字幕缓存和本地 ASR worker，默认每轮生成并发布一条总结评论，并将成功评论的 BV 号写入 `video-summary-state.json`。共享的 ASR 队列会串行执行两个轮询器的转写任务，避免同时加载 Whisper 或争用字幕缓存。
+`videoCommentEnabled` 开启后，视频评论轮询器会在 ASR 就绪时启动，与通知轮询相互独立。它会立即获取热门、个性化推荐和搜索结果，再按持久化的轮换顺序选择候选视频。流程复用现有的 BV 字幕缓存和本地 ASR worker，默认每轮生成并发布一条总结评论，并将成功评论的 BV 号写入 `video-summary-state.json`。共享的 ASR 队列会串行执行两个工作器的转写任务，避免同时加载 Whisper 或争用字幕缓存。
 
 获取上下文失败时，插件只在警告日志中输出错误原因，不打印堆栈，并继续处理剩余通知。
 
@@ -242,14 +244,14 @@ ASR 设置就绪后，视频评论轮询器会与通知轮询同时启动。它�
 
 通知轮询器处理评论区的 @ 和回复通知。独立的视频评论器会直接发布公开评论，不会逐条征求确认。
 
-- 用户未在插件设置卡片同意安装 ASR 依赖前，通知轮询保持暂停；暂缓或安装失败时，专栏回复也会暂停。
+- 只有保存有效主人 UID 且 ASR 依赖安装成功后才会启动通知轮询；清空 UID 会停止轮询，且只处理发送者 UID 匹配的消息。
 - B 站 API 或本地状态报错会终止当前轮询；下一次定时轮询会重试已保存的待办通知并重新扫描两个通知列表。
 - 配置次数的重写后，模型回复仍超过 1000 个 UTF-16 代码单元时，当前处理会跳过发送，通知留在待办队列供后续轮询重试。
 - 首次保存列表位置前已读掉的通知无法恢复；之后能否补抓轮询前已读的通知，取决于 B 站是否仍在列表中返回这些条目。
 - 多个 Host 进程共享同一个插件数据目录时可能并发处理并重复回复。
 - 本地去重文件会随已处理的评论数量增大。
 - 如果进程在 B 站接收回复后、本地状态保存前退出，可能会重复回复。
-- 视频评论默认启用并会直接发布，不经过人工审核；设置 `videoCommentEnabled: false` 可关闭。
+- 视频评论默认关闭；开启后会直接发布，不经过逐条人工审核。关闭开关会停止视频轮询。
 - 视频发现依赖 B 站的热门、推荐和搜索 API。接口变化或限流会跳过本轮；下一次定时扫描会重试。
 - 评论器使用可公开下载的音频，并跳过已知时长超过 `videoCommentMaxDurationSeconds` 的视频。较长字幕会被抽样，因此模型可能漏掉抽样片段之间的细节。
 - 视频状态只保留最近 2000 个成功评论的 BV 号。多个 Host 进程可能并发重复处理；若 B 站已接受评论但进程未保存状态就退出，也可能重复发布。

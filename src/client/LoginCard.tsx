@@ -1,6 +1,6 @@
 /** Browser login card with a temporary QR challenge and cancellable polling. */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { IconCheckOutline16, IconCloseOutline16, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   AsrSetupPanelProps,
@@ -40,7 +40,7 @@ const CLASSIC = {
  * @param props - the requested card view and localized text.
  * @returns a one-line summary or the login form.
  */
-export function BilibiliLoginCard({ view, t }: BilibiliLoginCardProps) {
+export function BilibiliLoginCard({ view, t, useSettings, saveSettings }: BilibiliLoginCardProps) {
   const [status, setStatus] = useState<LoginState>('idle')
   const [asrSetup, setAsrSetup] = useState<AsrSetupState>()
   const [whisperModelDownloaded, setWhisperModelDownloaded] = useState(false)
@@ -389,7 +389,135 @@ export function BilibiliLoginCard({ view, t }: BilibiliLoginCardProps) {
         />
       </div>
 
+      <AutomationSettingsPanel t={t} useSettings={useSettings} saveSettings={saveSettings} />
       <UsageGuide t={t} />
+    </section>
+  )
+}
+
+/** Edit the owner-only reply target and the opt-in automatic video commenter. */
+function AutomationSettingsPanel({ t, useSettings, saveSettings }: Pick<BilibiliLoginCardProps, 't' | 'useSettings' | 'saveSettings'>) {
+  const settings = useSettings(snapshot => snapshot)
+  const current = settings.value
+  const [ownerUid, setOwnerUid] = useState('')
+  const [videoCommentEnabled, setVideoCommentEnabled] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
+  const [savedNotice, setSavedNotice] = useState(false)
+
+  useEffect(() => {
+    if (current === undefined || dirty) return
+    setOwnerUid(current.ownerUid)
+    setVideoCommentEnabled(current.videoCommentEnabled)
+  }, [current?.ownerUid, current?.videoCommentEnabled, dirty])
+
+  const normalizedOwnerUid = ownerUid.trim()
+  const ownerUidInvalid = normalizedOwnerUid.length > 0 && !/^[1-9]\d*$/u.test(normalizedOwnerUid)
+  const canEdit = settings.status === 'ready' && settings.writable && current !== undefined
+  const readOnly = settings.status === 'ready' && !settings.writable
+  const unavailable = settings.status === 'unavailable' || (settings.status === 'ready' && current === undefined)
+  const changed = current !== undefined && (
+    normalizedOwnerUid !== current.ownerUid || videoCommentEnabled !== current.videoCommentEnabled
+  )
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    if (!canEdit || saving || ownerUidInvalid || !changed) return
+    setSaving(true)
+    setSaveFailed(false)
+    setSavedNotice(false)
+    try {
+      await saveSettings(normalizedOwnerUid, videoCommentEnabled)
+      setOwnerUid(normalizedOwnerUid)
+      setDirty(false)
+      setSavedNotice(true)
+    } catch {
+      setSaveFailed(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const disabled = !canEdit || saving
+  return (
+    <section style={{
+      background: 'linear-gradient(145deg, #fffaf0, #f8f2e6)',
+      border: '1px solid rgba(164, 136, 86, 0.36)',
+      borderRadius: '12px',
+      color: CLASSIC.ink,
+      display: 'grid',
+      gap: '0.85rem',
+      minWidth: 0,
+      padding: '1rem',
+    }}>
+      <div>
+        <h3 style={{ color: '#625641', fontSize: '0.98rem', margin: '0 0 0.25rem' }}>{t('automationSettingsTitle')}</h3>
+        {settings.status === 'loading' && <p role="status" style={{ color: CLASSIC.muted, fontSize: '0.82rem', margin: 0 }}>{t('settingsLoading')}</p>}
+        {unavailable && <p role="alert" style={{ color: CLASSIC.cinnabar, fontSize: '0.82rem', margin: 0 }}>{t('settingsUnavailable')}</p>}
+        {readOnly && <p role="status" style={{ color: CLASSIC.muted, fontSize: '0.82rem', margin: 0 }}>{t('settingsReadOnly')}</p>}
+      </div>
+      <form onSubmit={event => { void submit(event) }} style={{ display: 'grid', gap: '0.9rem' }}>
+        <div style={{ display: 'grid', gap: '0.35rem' }}>
+          <label htmlFor="bilibili-owner-uid" style={{ color: '#625641', fontSize: '0.84rem', fontWeight: 700 }}>{t('ownerUidLabel')}</label>
+          <input
+            id="bilibili-owner-uid"
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={t('ownerUidPlaceholder')}
+            value={ownerUid}
+            disabled={disabled}
+            aria-invalid={ownerUidInvalid}
+            aria-describedby={ownerUidInvalid ? 'bilibili-owner-uid-help bilibili-owner-uid-error' : 'bilibili-owner-uid-help'}
+            onChange={event => {
+              setOwnerUid(event.currentTarget.value)
+              setDirty(true)
+              setSaveFailed(false)
+              setSavedNotice(false)
+            }}
+            style={{ background: disabled ? '#f0ece3' : '#fffdf8', border: `1px solid ${ownerUidInvalid ? '#ff4d4f' : 'rgba(161, 132, 82, 0.45)'}`, borderRadius: '7px', boxSizing: 'border-box', color: CLASSIC.ink, font: 'inherit', fontSize: '0.88rem', minHeight: '40px', opacity: disabled ? 0.68 : 1, padding: '0.5rem 0.65rem', width: '100%' }}
+          />
+          <p id="bilibili-owner-uid-help" style={{ color: CLASSIC.muted, fontSize: '0.78rem', lineHeight: 1.45, margin: 0 }}>{t('ownerUidHelp')}</p>
+          {ownerUidInvalid && <p id="bilibili-owner-uid-error" role="alert" style={{ color: CLASSIC.cinnabar, fontSize: '0.78rem', margin: 0 }}>{t('ownerUidInvalid')}</p>}
+        </div>
+
+        <div style={{ alignItems: 'center', display: 'flex', gap: '0.75rem', justifyContent: 'space-between' }}>
+          <div style={{ display: 'grid', gap: '0.25rem', minWidth: 0 }}>
+            <span id="bilibili-video-comment-label" style={{ color: '#625641', fontSize: '0.84rem', fontWeight: 700 }}>{t('videoCommentLabel')}</span>
+            <p style={{ color: CLASSIC.muted, fontSize: '0.78rem', lineHeight: 1.45, margin: 0 }}>{t('videoCommentHelp')}</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-labelledby="bilibili-video-comment-label"
+            aria-checked={videoCommentEnabled}
+            disabled={disabled}
+            onClick={() => {
+              setVideoCommentEnabled(value => !value)
+              setDirty(true)
+              setSaveFailed(false)
+              setSavedNotice(false)
+            }}
+            style={{ alignItems: 'center', background: videoCommentEnabled ? '#faad14' : '#d8d1c4', border: '1px solid rgba(97, 72, 32, 0.24)', borderRadius: '999px', cursor: disabled ? 'not-allowed' : 'pointer', display: 'inline-flex', flex: '0 0 46px', height: '26px', opacity: disabled ? 0.65 : 1, padding: '2px', transition: 'background 140ms ease', width: '46px' }}
+          >
+            <span aria-hidden="true" style={{ background: '#fffdf8', borderRadius: '50%', boxShadow: '0 1px 3px rgba(55, 53, 45, 0.2)', height: '20px', transform: videoCommentEnabled ? 'translateX(20px)' : 'translateX(0)', transition: 'transform 140ms ease', width: '20px' }} />
+          </button>
+        </div>
+
+        <div style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: '0.65rem' }}>
+          <button
+            type="submit"
+            disabled={!canEdit || saving || ownerUidInvalid || !changed}
+            style={{ background: '#faad14', border: '1px solid #d48806', borderRadius: '7px', color: '#4b3405', cursor: !canEdit || saving || ownerUidInvalid || !changed ? 'not-allowed' : 'pointer', font: 'inherit', fontSize: '0.82rem', fontWeight: 700, minHeight: '36px', opacity: !canEdit || saving || ownerUidInvalid || !changed ? 0.58 : 1, padding: '0.45rem 0.8rem' }}
+          >
+            {saving ? t('savingSettings') : t('saveSettings')}
+          </button>
+          {saveFailed && <span role="alert" style={{ color: CLASSIC.cinnabar, fontSize: '0.8rem' }}>{t('settingsSaveFailed')}</span>}
+          {savedNotice && <span role="status" style={{ color: CLASSIC.jade, fontSize: '0.8rem' }}>{t('settingsSaved')}</span>}
+        </div>
+      </form>
     </section>
   )
 }

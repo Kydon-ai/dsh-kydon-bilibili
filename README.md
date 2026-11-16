@@ -1,11 +1,11 @@
 ---
-description: "Configures Bilibili QR login, automatic replies to unread comment notifications, and recurring video summary comments. Videos are transcribed locally before the model drafts timestamped summaries for the signed-in account."
+description: "Configures Bilibili QR login, owner-UID-only replies to unread comment notifications, and opt-in recurring video summaries. Videos are transcribed locally before the model drafts timestamped summaries for the signed-in account."
 kind: "package-reference"
 ---
 
 <h1 align="center">@kydon/dsh-kydon-bilibili</h1>
 
-<p align="center"><em>QR login, automatic notification replies, and local video summaries for DSH.</em></p>
+<p align="center"><em>QR login, owner-only notification replies, and opt-in local video summaries for DSH.</em></p>
 
 <p align="center">
   <img src="assets/bilibili-plugin-icon.png" alt="Bilibili DSH plugin icon" width="144" />
@@ -30,9 +30,9 @@ Sign in to Bilibili with the settings QR card, then let the Host reply to unread
 ## 2. Features
 
 - **QR sign-in:** Link a Bilibili account from the DSH settings card.
-- **Notification replies:** Poll unread @ and comment-reply notifications, keep pending items across retries, and avoid handling the same item twice. Generated replies are checked against Bilibili's 1,000-character limit before sending.
+- **Owner-only notification replies:** Enter an owner UID in the settings card to start polling unread @ and comment-reply notifications. Only notifications from that UID are queued or answered; leaving it blank disables message polling. Pending items from other senders are discarded before processing.
 - **Local video transcription:** Download audio from accessible public videos and transcribe it with `faster-whisper` `small`. GPU batch inference is preferred when CUDA is available; CPU transcription is the fallback. SRT subtitles are cached by BV id and page for reuse.
-- **Scheduled video summaries:** Rotate through popular, recommended, and search feeds, use the bundled `cc-summary` skill to draft timestamped summaries, and post a top-level comment. Video comments are enabled by default; set `videoCommentEnabled: false` to turn them off.
+- **Scheduled video summaries:** An opt-in switch rotates through popular, recommended, and search feeds, uses the bundled `cc-summary` skill to draft timestamped summaries, and posts a top-level comment. Automatic video polling is off by default.
 - **Consent-based ASR setup:** Approve the local `uv` environment setup from the settings card. The Whisper model is downloaded separately when transcription first needs it.
 
 <a id="install"></a>
@@ -66,7 +66,7 @@ Mount this plugin in the Host composition that owns the Bilibili login card.
 
 ### 4.1 When to choose it
 
-Use it when a signed-in Bilibili account should automatically reply to unread @ and comment-reply notifications and, by default, post one model-generated video summary every ten minutes. Set `videoCommentEnabled: false` to stop video comments while notification replies continue.
+Use it when a signed-in Bilibili account should reply only to messages from a configured owner UID. Notification polling stays off until that UID is set. Automatic video summaries are a separate option, off by default.
 
 ### 4.2 Minimal mount configuration
 
@@ -76,25 +76,27 @@ The profile patch mounts the plugin with the defaults below; change these values
 - id: dsh-kydon-bilibili
   name: '@kydon/dsh-kydon-bilibili'
   config:
+    ownerUid: ''
     qrPollIntervalMs: 2000
     qrTimeoutMs: 180000
     notificationPollIntervalMs: 60000
     notificationRequestTimeoutMs: 20000
     replyGenerationTimeoutMs: 120000
-    videoCommentEnabled: true
+    videoCommentEnabled: false
     videoCommentIntervalMs: 600000
     videoCommentMaxPerRun: 1
 ```
 
 | Field | Default | Meaning |
 |---|---:|---|
+| `ownerUid` | `''` | Positive decimal Bilibili UID allowed to receive automatic replies. Empty disables notification polling. |
 | `qrPollIntervalMs` | `2000` | Delay between browser QR status requests. |
 | `qrTimeoutMs` | `180000` | Maximum wait for one QR login. |
-| `notificationPollIntervalMs` | `60000` | Delay between checks, from `10000` to `3600000` ms; the first check starts as soon as setup is ready. |
+| `notificationPollIntervalMs` | `60000` | Delay between checks, from `10000` to `3600000` ms; polling starts after ASR setup only when `ownerUid` is set. |
 | `notificationRequestTimeoutMs` | `20000` | Request timeout, from `1000` to `120000` ms. |
 | `replyGenerationTimeoutMs` | `120000` | Maximum model-generation duration, from `1000` to `300000` ms. |
 | `replyLengthRewriteAttempts` | `2` | Additional model rewrites after an oversized draft, from `0` to `5`. |
-| `videoCommentEnabled` | `true` | Publish video summary comments after ASR setup. Disable it to keep notification replies only. |
+| `videoCommentEnabled` | `false` | Opt in to periodic video summary comments after ASR setup. This can be enabled independently of `ownerUid`. |
 | `videoCommentIntervalMs` | `600000` | Delay between cycles, from `60000` to `3600000` ms; the first cycle starts as soon as ASR setup is ready. |
 | `videoCommentMaxPerRun` | `1` | Maximum videos attempted per cycle, from `1` to `3`. |
 | `videoCommentMaxDurationSeconds` | `1800` | Skip videos with a known duration above this value, from `60` to `14400` seconds. |
@@ -112,11 +114,11 @@ The profile patch mounts the plugin with the defaults below; change these values
 
 For each video notification, the plugin reads the BV id and page from the notification URL and checks the matching SRT cache first. On a cache miss or invalid subtitle, it downloads that page's audio with `yt-dlp` and transcribes it with the `faster-whisper` `small` model. The plugin does not call Bilibili subtitle APIs; `yt-dlp` makes the media-resolution requests needed to download audio and checks that the returned BV id matches the notification URL. Downloaded audio stays in `.cache/audio/`; generated SRT files stay in `.cache/subtitles/` with filenames containing the BV id and page. Later notifications reuse a valid matching subtitle before downloading audio. The Whisper model is cached in `.cache/`. The first run may download the model. Transcription checks for CUDA and tries GPU `float16` through `BatchedInferencePipeline` using the configured `asrBatchSize`, which defaults to `32`. If no CUDA device is available, or GPU model initialization or batched inference fails, it retries on CPU with `int8` using direct transcription. `asr-worker.py` uses the public video URL and does not read the plugin's login cookies; videos that require login, are inaccessible, or are otherwise restricted cannot use this local transcription path.
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) before starting the plugin. Select **Install** on the settings card to approve `uv sync --locked` in the plugin root. Notification polling and replies stay paused until setup succeeds; QR login remains available. After a successful install, the Host writes a marker under the DSH home directory and starts polling without a restart. Later starts skip installation when the marker matches `uv.lock` and the plugin `.venv` Python still exists; a changed lock or missing environment returns the card to the install state. The first video transcription downloads the Whisper model separately. `pyproject.toml` declares dependencies and uv project settings, `uv.lock` pins resolved versions, and `.python-version` selects Python 3.12.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) before starting the plugin. Select **Install** on the settings card to approve `uv sync --locked` in the plugin root. Notification polling and replies stay paused until setup succeeds and a valid owner UID is configured; QR login remains available. After a successful install, the Host writes a marker under the DSH home directory and starts configured workers without a restart. Later starts skip installation when the marker matches `uv.lock` and the plugin `.venv` Python still exists; a changed lock or missing environment returns the card to the install state. The first video transcription downloads the Whisper model separately.
 
 ### 4.4 Automatic video summary comments
 
-After ASR setup succeeds, the Host runs one video scan immediately and then starts another every `videoCommentIntervalMs` milliseconds. If no Bilibili credential is saved, the scan waits for the next interval. Set `videoCommentEnabled` to `false` to disable this poller without stopping notification replies.
+Video watching is off by default. Enable `videoCommentEnabled` in the settings card to run one scan immediately after ASR setup, then repeat every `videoCommentIntervalMs` milliseconds. If no Bilibili credential is saved, the scan waits for the next interval. The setting is independent of owner-only notification replies.
 
 Each cycle fetches the popular list, the signed-in account’s recommendation feed, and one video search using the next configured term. The source cursor rotates between popular, recommendations, and search. The default limit attempts one video per cycle; videos with a known duration above `videoCommentMaxDurationSeconds` are skipped. The model receives the title, description, and cached or freshly transcribed subtitles. When subtitle text exceeds `videoCommentMaxTranscriptCharacters`, the plugin samples cues evenly in transcript order.
 
@@ -179,9 +181,9 @@ Each plugin instance also creates a `*-requests-*.log` file. It records incoming
 <details>
 <summary>Implementation details — click to expand</summary>
 
-The Host waits for the settings-card approval and a successful `uv sync --locked` before it starts `/x/msgfeed/unread` polling. A lock-digest marker in the DSH home directory skips later installs while the locked environment is present. QR login remains available while setup is pending. After setup, the Host processes reply notifications before @ notifications and prints unread counts to the server terminal. Article comments (`business_id=12`) include the article body. For video comments (`business_id=1`), it reads the BV id and page from the notification URL, downloads that page's audio, and generates timestamped SRT subtitles with local `faster-whisper`. The plugin does not call Bilibili subtitle APIs; `yt-dlp` makes the media-resolution requests needed to download audio and checks the BV id against the notification URL. Transcription tries CUDA GPU first and falls back to CPU `int8` when the GPU is unavailable or model loading or inference fails. Audio and SRT files remain in the configured cache directory. Reply notifications include the root and earlier thread replies, while @ notifications include only the current comment. Comment lines include Unix millisecond timestamps (`ctime` for thread comments and `at_time` for @ notifications). The Host sends this context to an isolated DSH Agent Session using the configured default model; tool execution is denied. It prints the collected context, then prints the generated reply with its Unix millisecond timestamp before posting through `/x/v2/reply/add`. If article text or local audio transcription is unavailable, video identifiers disagree, generation fails, or the model returns empty text, the notification is skipped. The conversation log records the video identifier, page, language, cue count, duration, audio and SRT paths, and local transcription device with any CPU fallback reason. Cordis effects own installation and polling; unload cancels and awaits the installer and poller.
+The Host waits for settings-card approval and a successful `uv sync --locked` before it starts workers. Notification polling starts only when a valid owner UID is configured; without one, the Host makes no `/x/msgfeed/unread` requests. It queues only notifications whose sender UID matches the configured owner and discards pending entries without a matching sender before processing. A lock-digest marker in the DSH home directory skips later installs while the locked environment is present. QR login remains available while setup is pending. Once polling is enabled, the Host processes reply notifications before @ notifications and prints unread counts to the server terminal. Article comments (`business_id=12`) include the article body. For video comments (`business_id=1`), it reads the BV id and page from the notification URL, downloads that page's audio, and generates timestamped SRT subtitles with local `faster-whisper`. The plugin does not call Bilibili subtitle APIs; `yt-dlp` makes the media-resolution requests needed to download audio and checks the BV id against the notification URL. Transcription tries CUDA GPU first and falls back to CPU `int8` when the GPU is unavailable or model loading or inference fails. Audio and SRT files remain in the configured cache directory. Reply notifications include the root and earlier thread replies, while @ notifications include only the current comment. Comment lines include Unix millisecond timestamps (`ctime` for thread comments and `at_time` for @ notifications). The Host sends this context to an isolated DSH Agent Session using the configured default model; tool execution is denied. It prints the collected context, then prints the generated reply with its Unix millisecond timestamp before posting through `/x/v2/reply/add`. If article text or local audio transcription is unavailable, video identifiers disagree, generation fails, or the model returns empty text, the notification is skipped. The conversation log records the video identifier, page, language, cue count, duration, audio and SRT paths, and local transcription device with any CPU fallback reason. Cordis effects own setup and both workers; unload cancels and awaits active work.
 
-The video commenter starts beside notification polling when ASR setup becomes ready. It immediately fetches popular, personalized recommendation, and search results, then selects candidates in a persisted rotating source order. It uses the existing BVID subtitle cache and local ASR worker, generates one public summary comment by default, and records successful BVIDs in `video-summary-state.json`. A shared ASR queue serializes work from both pollers so they do not load Whisper at the same time or race on the subtitle cache.
+When `videoCommentEnabled` is true, the video commenter starts after ASR setup becomes ready, independently of notification polling. It immediately fetches popular, personalized recommendation, and search results, then selects candidates in a persisted rotating source order. It uses the existing BVID subtitle cache and local ASR worker, generates one public summary comment per cycle by default, and records successful BVIDs in `video-summary-state.json`. A shared ASR queue serializes work from both workers so they do not load Whisper at the same time or race on the subtitle cache.
 
 Context retrieval failures are logged as warnings with the error message and no stack trace; the poller continues with the remaining notifications.
 
@@ -242,14 +244,14 @@ Each notification or video uses a new Session, so earlier source content does no
 
 The notification poller handles comment @ and reply notifications. The separate video commenter publishes public comments without a per-comment approval step.
 
-- Notification polling stays paused until the user approves ASR dependency installation in the plugin settings card; deferring or failing setup also pauses article replies.
+- Notification polling stays off until a valid owner UID is saved and ASR dependency setup succeeds. Clearing the UID stops polling; only matching sender UIDs can be queued or answered.
 - Bilibili API or local-state errors stop the current poll; the next scheduled poll retries saved pending notifications and scans both feeds again.
 - If the model still exceeds 1,000 UTF-16 code units after the configured rewrites, the current attempt is skipped and the notification remains pending for a later poll.
 - The first saved feed checkpoint cannot recover notifications already read before that baseline; later read-before-poll recovery depends on Bilibili continuing to return those entries in the feed.
 - Multiple Host processes sharing one plugin data directory can race and send duplicate replies.
 - The local deduplication file grows with the number of handled comments.
 - A process failure after Bilibili accepts a reply but before local state is saved can cause a duplicate reply.
-- Video comments are enabled by default and publish without a review step; set `videoCommentEnabled: false` to disable them.
+- Video comments are off by default. Enabling them publishes without a per-comment review step; turning the setting off stops the video poller.
 - Discovery depends on Bilibili feed, recommendation, and search APIs. API changes or rate limits can skip a cycle; the next scheduled cycle retries discovery.
 - The commenter uses public audio and skips videos whose known duration exceeds `videoCommentMaxDurationSeconds`. Longer transcripts are sampled, so the model may miss details between selected cues.
 - The video state remembers only the latest 2,000 successfully commented BVIDs. Multiple Host processes can race, and a process failure after Bilibili accepts a comment but before state is saved can cause a duplicate.

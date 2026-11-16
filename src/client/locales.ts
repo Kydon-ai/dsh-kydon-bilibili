@@ -8,7 +8,7 @@ export const LOCALE_NAMESPACE = 'dsh-kydon-bilibili'
 /** Simplified Chinese copy defines the card's key set. */
 export const zh = {
   title: 'Bilibili',
-  description: '使用 Bilibili 扫码登录。自动回复需在插件设置卡片同意安装本地转写依赖后启动。凭证保存在本机 DSH 用户目录。',
+  description: '使用 Bilibili 扫码登录。填写主人 UID 后，插件只回复该 UID 发来的消息；未填写时不会轮询消息。视频总结轮询默认关闭，可在此卡片开启。凭证保存在本机 DSH 用户目录。',
   loginCardTitle: '账号授权',
   loginStateIdle: '待开始',
   loginSuccessHint: '登录凭证已保存在本机 DSH 用户目录。',
@@ -45,7 +45,7 @@ export const zh = {
   asrNotDownloaded: '未下载',
   asrModelRemove: '卸载 Whisper 模型',
   asrModelRemoving: '卸载中',
-  usageMarkdown: '## 使用说明\n\n1. **安装基础环境**：与 dsh 加载插件首次对话会下载工具执行环境。Python 转写环境就绪后，可点击依赖列表中的“下载”预先下载 Whisper small 模型；首次解析视频时也会自动下载。\n2. **扫码登录**：点击“扫码登录”，使用 Bilibili 手机应用扫描二维码并确认。\n3. **开始使用**：登录成功且基础环境就绪后，通知轮询和自动回复会启动。\n4. **管理模型**：已下载的 Whisper 模型会显示在依赖列表中，可以重装或单独卸载。Python 转写环境就绪时不提供重装或卸载操作。',
+  usageMarkdown: '## 使用说明\n\n1. **安装基础环境**：与 dsh 加载插件首次对话会下载工具执行环境。Python 转写环境就绪后，可点击依赖列表中的“下载”预先下载 Whisper small 模型；首次解析视频时也会自动下载。\n2. **扫码登录**：点击“扫码登录”，使用 Bilibili 手机应用扫描二维码并确认。\n3. **设置主人 UID**：填写 UID 后，插件只轮询并回复该 UID 发来的 @ 和评论回复；留空时不会监听消息。\n4. **启用视频总结**：自动观看视频并发布总结默认关闭，可在下方设置中开启。\n5. **管理模型**：已下载的 Whisper 模型会显示在依赖列表中，可以重装或单独卸载。Python 转写环境就绪时不提供重装或卸载操作。',
   markdownCopyLabel: '复制代码',
   markdownCopiedLabel: '已复制',
   markdownFootnotesLabel: '脚注',
@@ -75,6 +75,20 @@ export const zh = {
   asrStateFailed: '失败',
   asrInstall: '安装转写依赖',
   asrUnavailable: '无法连接本机 DSH 的依赖安装服务。',
+  automationSettingsTitle: '自动化设置',
+  ownerUidLabel: '主人 UID',
+  ownerUidPlaceholder: '填写 Bilibili UID',
+  ownerUidHelp: '留空时暂停消息轮询与回复；填写后只处理该 UID 发来的 @ 和评论回复通知。',
+  ownerUidInvalid: '请输入正整数 UID，或留空以关闭消息回复。',
+  videoCommentLabel: '自动观看视频并发布总结',
+  videoCommentHelp: '开启后，ASR 环境就绪时立即扫描视频，之后按设定间隔轮询；默认关闭。',
+  settingsLoading: '正在读取设置…',
+  settingsUnavailable: '设置服务不可用，暂时无法读取或保存。',
+  settingsReadOnly: '当前连接不支持保存设置。',
+  saveSettings: '保存设置',
+  savingSettings: '正在保存…',
+  settingsSaved: '设置已保存。',
+  settingsSaveFailed: '设置未能保存，请重试。',
 } satisfies Record<string, string>
 
 /** Keys in the Bilibili login dictionaries. */
@@ -83,7 +97,7 @@ export type BilibiliLoginLocaleKey = keyof typeof zh
 /** English copy, checked against the Chinese dictionary keys. */
 export const en = {
   title: 'Bilibili',
-  description: 'Sign in to Bilibili by QR code. Automatic replies start after you approve local transcription setup in this plugin settings card. Credentials stay in the local DSH home.',
+  description: 'Sign in to Bilibili by QR code. Enter the owner UID to monitor notifications and reply only to messages from that UID; polling stays off while it is empty. Video summary polling is off by default and can be enabled here. Credentials stay in the local DSH home.',
   loginCardTitle: 'Account authorization',
   loginStateIdle: 'Not started',
   loginSuccessHint: 'The login credentials are saved in the local DSH home.',
@@ -120,7 +134,7 @@ export const en = {
   asrNotDownloaded: 'Not downloaded',
   asrModelRemove: 'Uninstall Whisper model',
   asrModelRemoving: 'Removing',
-  usageMarkdown: '## How to use\n\n1. **Install the base environment**: Select Install beside the Python transcription environment to set up yt-dlp and faster-whisper. When the environment is ready, select Download beside Whisper small to cache it in advance; the model also downloads automatically during the first video transcription.\n2. **Sign in**: Select “Scan to sign in”, scan the QR code with the Bilibili mobile app, and confirm.\n3. **Start using the plugin**: Notification polling and automatic replies start after sign-in and base environment setup are complete.\n4. **Manage the model**: A downloaded Whisper model appears in the dependency list and can be reinstalled or uninstalled separately. The ready Python transcription environment has no reinstall or uninstall action.',
+  usageMarkdown: '## How to use\n\n1. **Install the base environment**: Select Install beside the Python transcription environment to set up yt-dlp and faster-whisper. When the environment is ready, select Download beside Whisper small to cache it in advance; the model also downloads automatically during the first video transcription.\n2. **Sign in**: Select “Scan to sign in”, scan the QR code with the Bilibili mobile app, and confirm.\n3. **Set the owner UID**: Enter a UID to monitor and reply only to @ and comment-reply notifications from that UID. Leave it blank to keep message polling off.\n4. **Enable video summaries**: Automatic video watching and summary comments are off by default; enable them in the settings below.\n5. **Manage the model**: A downloaded Whisper model appears in the dependency list and can be reinstalled or uninstalled separately. The ready Python transcription environment has no reinstall or uninstall action.',
   markdownCopyLabel: 'Copy code',
   markdownCopiedLabel: 'Copied',
   markdownFootnotesLabel: 'Footnotes',
@@ -150,6 +164,20 @@ export const en = {
   asrStateFailed: 'Failed',
   asrInstall: 'Install transcription dependencies',
   asrUnavailable: 'The local DSH dependency setup service could not be reached.',
+  automationSettingsTitle: 'Automation settings',
+  ownerUidLabel: 'Owner UID',
+  ownerUidPlaceholder: 'Enter a Bilibili UID',
+  ownerUidHelp: 'Leave blank to pause notification polling and replies. When set, only @ and comment-reply notifications from this UID are processed.',
+  ownerUidInvalid: 'Enter a positive integer UID, or leave it blank to disable message replies.',
+  videoCommentLabel: 'Watch videos and post summaries automatically',
+  videoCommentHelp: 'When enabled, video scans start as soon as ASR is ready and repeat at the configured interval. Off by default.',
+  settingsLoading: 'Loading settings…',
+  settingsUnavailable: 'The settings service is unavailable, so values cannot be read or saved.',
+  settingsReadOnly: 'This connection does not support saving settings.',
+  saveSettings: 'Save settings',
+  savingSettings: 'Saving…',
+  settingsSaved: 'Settings saved.',
+  settingsSaveFailed: 'Settings could not be saved. Try again.',
 } satisfies Record<BilibiliLoginLocaleKey, string>
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
