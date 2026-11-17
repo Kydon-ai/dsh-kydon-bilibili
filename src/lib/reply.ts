@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
@@ -20,6 +20,12 @@ import {
   BILIBILI_REPLY_REWRITE_TARGET_CHARACTERS,
   countReplyCharacters,
 } from './reply-length.ts'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-kydon-bilibili': { kind: 'dsh-kydon-bilibili' }
+  }
+}
 
 const PLUGIN_NAME = 'dsh-kydon-bilibili'
 const VIDEO_SUMMARY_SKILL_NAME = 'cc-summary'
@@ -95,7 +101,6 @@ export async function generateReply(
         complete: true,
         text: completeSystemPrompt,
       })
-      agentCtx.tools.presentAs('native')
       agentCtx.tools.restrict({ allow: [] })
       agentCtx.tools.guard(exec => (
         kind === 'video-summary' && exec.name === 'skill'
@@ -118,7 +123,7 @@ export async function generateReply(
     generationSignal.throwIfAborted()
     handle.agent.followup(createUserMessage({
       content: [{ type: 'text', text: prompt }],
-      source: { kind: 'plugin', plugin: PLUGIN_NAME },
+      source: { kind: 'dsh-kydon-bilibili' },
     }))
     await handle.agent.whenIdle()
     generationSignal.throwIfAborted()
@@ -152,7 +157,7 @@ export async function generateReply(
           type: 'text',
           text: rewritePrompt(kind),
         }],
-        source: { kind: 'plugin', plugin: PLUGIN_NAME },
+        source: { kind: 'dsh-kydon-bilibili' },
       }))
       await handle.agent.whenIdle()
       generationSignal.throwIfAborted()

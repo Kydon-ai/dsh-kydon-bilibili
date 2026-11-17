@@ -24,12 +24,12 @@ kind: "package-reference"
 <a id="summary"></a>
 ## 1. Summary
 
-Sign in to Bilibili with the settings QR card, then let the Host reply to unread @ notifications and comment replies. When enabled, it also discovers public videos and posts a timestamped summary comment after local transcription. ASR setup must succeed before either poller starts.
+Sign in to Bilibili from **Settings > Bilibili**, then let the Host reply to unread @ notifications and comment replies. When enabled, it also discovers public videos and posts a timestamped summary comment after local transcription. ASR setup must succeed before either poller starts.
 
 <a id="features"></a>
 ## 2. Features
 
-- **QR sign-in:** Link a Bilibili account from the DSH settings card.
+- **QR sign-in:** Link a Bilibili account from **Settings > Bilibili** or the plugin's configuration panel.
 - **Owner-only notification replies:** Enter an owner UID in the settings card to start polling unread @ and comment-reply notifications. Only notifications from that UID are queued or answered; leaving it blank disables message polling. Pending items from other senders are discarded before processing.
 - **Local video transcription:** Download audio from accessible public videos and transcribe it with `faster-whisper` `small`. GPU batch inference is preferred when CUDA is available; CPU transcription is the fallback. SRT subtitles are cached by BV id and page for reuse.
 - **Scheduled video summaries:** An opt-in switch rotates through popular, recommended, and search feeds, uses the bundled `cc-summary` skill to draft timestamped summaries, and posts a top-level comment. Automatic video polling is off by default.
@@ -37,6 +37,8 @@ Sign in to Bilibili with the settings QR card, then let the Host reply to unread
 
 <a id="install"></a>
 ## 3. Install
+
+**Compatibility:** DeepSeek Harness `0.2.2-rc.3`.
 
 Add the package to a DSH profile:
 

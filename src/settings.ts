@@ -1,7 +1,7 @@
-/** Namespace and client-visible values for the plugin's user settings. */
+/** Entry identity and client-visible values for the plugin's live Config form. */
 
-/** Durable settings namespace registered by the Bilibili plugin. */
-export const BILIBILI_SETTINGS_NAMESPACE = 'kydon-bilibili'
+/** Stable Loader entry id used by cordis.yml and configForms.get(). */
+export const BILIBILI_CONFIG_ENTRY_ID = 'dsh-kydon-bilibili'
 
 /** Settings used to gate notification replies and automatic video summaries. */
 export interface BilibiliAutomationSettings {

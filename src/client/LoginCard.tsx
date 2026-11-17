@@ -1,7 +1,7 @@
 /** Browser login card with a temporary QR challenge and cancellable polling. */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
-import { IconCheckOutline16, IconCloseOutline16, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   AsrSetupPanelProps,
   AsrSetupState,
@@ -397,7 +397,7 @@ export function BilibiliLoginCard({ view, t, useSettings, saveSettings }: Bilibi
 
 /** Edit the owner-only reply target and the opt-in automatic video commenter. */
 function AutomationSettingsPanel({ t, useSettings, saveSettings }: Pick<BilibiliLoginCardProps, 't' | 'useSettings' | 'saveSettings'>) {
-  const settings = useSettings(snapshot => snapshot)
+  const settings = useSettings((snapshot) => snapshot)
   const current = settings.value
   const [ownerUid, setOwnerUid] = useState('')
   const [videoCommentEnabled, setVideoCommentEnabled] = useState(false)
@@ -843,7 +843,9 @@ function DependencyStatusIcon({ installed, label }: DependencyStatusIconProps) {
       title={label}
       style={{ alignItems: 'center', border: `1px solid ${color}`, borderRadius: '50%', color, display: 'inline-flex', flex: '0 0 16px', height: '16px', justifyContent: 'center', width: '16px' }}
     >
-      {installed ? <IconCheckOutline16 size={10} /> : <IconCloseOutline16 size={9} />}
+      {installed
+        ? <svg aria-hidden="true" height="10" viewBox="0 0 16 16" width="10"><path d="m3 8 3.2 3.2L13 4.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" /></svg>
+        : <svg aria-hidden="true" height="9" viewBox="0 0 16 16" width="9"><path d="m4 4 8 8m0-8-8 8" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" /></svg>}
     </span>
   )
 }

@@ -1,12 +1,12 @@
 /** Bilibili QR login Host plugin and its authenticated browser API. */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-client-connection'
-import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type { AsrOptions } from './lib/asr.ts'
 import { AsrSetupManager, type AsrSetupSnapshot } from './lib/asr-setup.ts'
@@ -16,7 +16,6 @@ import { generateReply } from './lib/reply.ts'
 import { runVideoCommentCycle } from './lib/video-comments.ts'
 import { createRequestLog, type ConversationLog } from './lib/conversation-log.ts'
 import { logIncoming } from './lib/http-log.ts'
-import { BILIBILI_SETTINGS_NAMESPACE } from './settings.ts'
 
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'dsh-kydon-bilibili'
@@ -38,7 +37,7 @@ const ASR_WORKER_PATH = resolve(PLUGIN_DIR, 'asr-worker.py')
 /** QR login and Bilibili notification polling behavior configured by the deployment. */
 export interface Config {
   /** Bilibili UID whose messages the plugin may answer. Empty disables notification polling. */
-  ownerUid?: string
+  ownerUid: Volatile<string>
   /** Delay between QR status requests, in milliseconds. Defaults to 2000. */
   qrPollIntervalMs?: number
   /** Maximum QR login wait, in milliseconds. Defaults to 180000. */
@@ -52,7 +51,7 @@ export interface Config {
   /** Additional model rewrites after an oversized reply, from 0 to 5. Defaults to 2. */
   replyLengthRewriteAttempts?: number
   /** Enable automatic video summary comments. Defaults to false. */
-  videoCommentEnabled?: boolean
+  videoCommentEnabled: Volatile<boolean>
   /** Delay between video discovery and comment cycles, in milliseconds. Defaults to 600000. */
   videoCommentIntervalMs?: number
   /** Maximum videos to comment on in one discovery cycle, from 1 to 3. Defaults to 1. */
@@ -79,16 +78,16 @@ export interface Config {
   logDir?: string
 }
 
-/** Cordis-validated login and notification polling settings. */
-export const Config: z<Config> = z.object({
-  ownerUid: z.string().default(''),
+/** Cordis-validated configuration, with account controls live-editable in DSH settings. */
+export const Config = z.object({
+  ownerUid: z.string().default('').volatile(),
   qrPollIntervalMs: z.number().step(1).min(500).max(10_000).default(2_000),
   qrTimeoutMs: z.number().step(1).min(10_000).max(300_000).default(180_000),
   notificationPollIntervalMs: z.number().step(1).min(10_000).max(3_600_000).default(60_000),
   notificationRequestTimeoutMs: z.number().step(1).min(1_000).max(120_000).default(20_000),
   replyGenerationTimeoutMs: z.number().step(1).min(1_000).max(300_000).default(120_000),
   replyLengthRewriteAttempts: z.number().step(1).min(0).max(5).default(2),
-  videoCommentEnabled: z.boolean().default(false),
+  videoCommentEnabled: z.boolean().default(false).volatile(),
   videoCommentIntervalMs: z.number().step(1).min(60_000).max(3_600_000).default(600_000),
   videoCommentMaxPerRun: z.number().step(1).min(1).max(3).default(1),
   videoCommentMaxDurationSeconds: z.number().step(1).min(60).max(14_400).default(1_800),
@@ -146,7 +145,7 @@ const LOG_PREFIX = '[dsh-kydon-bilibili]'
  * @param ctx - Host context with Connection and subprocess services.
  * @param config - Login, notification polling, local transcription, and log-directory settings.
  */
-export function apply(ctx: Context, config: Config = {}): void {
+export function apply(ctx: Context, config: Config): void {
   let resolved = resolveConfig(config)
   const requestLog = createRequestLog(resolved.logDir)
   let disposed = false
@@ -155,7 +154,6 @@ export function apply(ctx: Context, config: Config = {}): void {
   let stopPoller: (() => Promise<void>) | undefined
   let activeOwnerUid: string | undefined
   let stopVideoCommenter: (() => Promise<void>) | undefined
-  let configSource: () => Config = () => config
   const setup = new AsrSetupManager({
     pluginDir: PLUGIN_DIR,
     lockPath: resolve(PLUGIN_DIR, 'uv.lock'),
@@ -178,20 +176,13 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
     warn: message => console.warn(`${LOG_PREFIX} ${message}`),
   })
-  ctx.inject(['settings'], settingsCtx => {
-    settingsCtx.settings.installSection(ctx, BILIBILI_SETTINGS_NAMESPACE, Config, config, {
-      validate: value => { void resolveConfig(value) },
-      setSource: source => { configSource = source },
-      onChange: () => {
-        try {
-          resolved = resolveConfig(configSource())
-        } catch (error) {
-          console.warn(`${LOG_PREFIX} settings update was rejected.`, error)
-          return
-        }
-        void syncWorkers()
-      },
-    })
+  ctx.on('loader/volatile-update', () => {
+    try {
+      resolved = resolveConfig(config)
+      void syncWorkers()
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} volatile configuration update was rejected.`, error)
+    }
   })
   // 获取二维码
   ctx.effect(() => ctx.connection.fetch.register({
@@ -439,14 +430,14 @@ export function apply(ctx: Context, config: Config = {}): void {
 
 /** Resolve and validate QR and notification polling settings at plugin load. */
 function resolveConfig(config: Config): ResolvedConfig {
-  const ownerUid = (config.ownerUid ?? '').trim()
+  const ownerUid = config.ownerUid.get().trim()
   const qrPollIntervalMs = config.qrPollIntervalMs ?? 2_000
   const qrTimeoutMs = config.qrTimeoutMs ?? 180_000
   const notificationPollIntervalMs = config.notificationPollIntervalMs ?? 60_000
   const notificationRequestTimeoutMs = config.notificationRequestTimeoutMs ?? 20_000
   const replyGenerationTimeoutMs = config.replyGenerationTimeoutMs ?? 120_000
   const replyLengthRewriteAttempts = config.replyLengthRewriteAttempts ?? 2
-  const videoCommentEnabled = config.videoCommentEnabled ?? false
+  const videoCommentEnabled = config.videoCommentEnabled.get()
   const videoCommentIntervalMs = config.videoCommentIntervalMs ?? 600_000
   const videoCommentMaxPerRun = config.videoCommentMaxPerRun ?? 1
   const videoCommentMaxDurationSeconds = config.videoCommentMaxDurationSeconds ?? 1_800

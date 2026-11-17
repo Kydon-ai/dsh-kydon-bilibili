@@ -1,7 +1,7 @@
 /** Browser-side types for the Bilibili login settings card. */
 
-import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { LOCALE_NAMESPACE } from './locales.ts'
 import type { BilibiliAutomationSettings } from '../settings.ts'
 
@@ -53,14 +53,15 @@ export interface LoginPoll {
 export interface BilibiliSettingsInjected {
   hooks: {
     /** Live view of the plugin's user settings. */
-    settings: SettingsScope<BilibiliAutomationSettings>
+    settings: HostObservable<ConfigFormSnapshot<BilibiliAutomationSettings>>
   }
   /** Save both automation controls as one settings-document mutation. */
   saveSettings: (ownerUid: string, videoCommentEnabled: boolean) => Promise<void>
 }
 
-export type BilibiliLoginCardProps = PropsRuntime<'plugins.bundle.config'>
-  & PropsLocale<typeof LOCALE_NAMESPACE>
+export type BilibiliLoginCardProps = {
+  view: PropsRuntime<'plugins.bundle.config'>['view']
+} & PropsLocale<typeof LOCALE_NAMESPACE>
   & InjectFace<BilibiliSettingsInjected>
 
 /** Props for the login panel and its request controls. */

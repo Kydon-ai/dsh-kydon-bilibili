@@ -8,6 +8,7 @@ export const LOCALE_NAMESPACE = 'dsh-kydon-bilibili'
 /** Simplified Chinese copy defines the card's key set. */
 export const zh = {
   title: 'Bilibili',
+  settingsSectionLabel: '哔哩哔哩',
   description: '使用 Bilibili 扫码登录。填写主人 UID 后，插件只回复该 UID 发来的消息；未填写时不会轮询消息。视频总结轮询默认关闭，可在此卡片开启。凭证保存在本机 DSH 用户目录。',
   loginCardTitle: '账号授权',
   loginStateIdle: '待开始',
@@ -97,6 +98,7 @@ export type BilibiliLoginLocaleKey = keyof typeof zh
 /** English copy, checked against the Chinese dictionary keys. */
 export const en = {
   title: 'Bilibili',
+  settingsSectionLabel: 'Bilibili',
   description: 'Sign in to Bilibili by QR code. Enter the owner UID to monitor notifications and reply only to messages from that UID; polling stays off while it is empty. Video summary polling is off by default and can be enabled here. Credentials stay in the local DSH home.',
   loginCardTitle: 'Account authorization',
   loginStateIdle: 'Not started',
